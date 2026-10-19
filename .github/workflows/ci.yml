@@ -31,4 +31,7 @@ jobs:
         run: flutter analyze
 
       - name: Test
+        # 时区相关的测试在 UTC 下验证不出问题，所以用一个非 UTC 时区运行
+        env:
+          TZ: Asia/Shanghai
         run: flutter test

@@ -9,7 +9,7 @@ import '../planner/day_key.dart';
 
 const _locale = 'en_US';
 
-/// 完整格式，例如 `Mon, Oct 20, 2026`。
+/// 完整格式，例如 `Tue, Oct 20, 2026`。
 String formatFullDate(DayKey day) =>
     DateFormat('EEE, MMM d, yyyy', _locale).format(_toDateTime(day));
 
@@ -20,7 +20,7 @@ String formatShortDate(DayKey day) {
   return DateFormat(pattern, _locale).format(_toDateTime(day));
 }
 
-/// 日期栏格子的两行，例如 `Oct 20` / `Mon`。一律不显示年份。
+/// 日期栏格子的两行，例如 `Oct 20` / `Tue`。一律不显示年份。
 ({String date, String weekday}) formatDateBarLabel(DayKey day) {
   final time = _toDateTime(day);
   return (
