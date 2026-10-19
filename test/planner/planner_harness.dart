@@ -3,7 +3,6 @@ import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:my_personal_use_app/planner/day_key.dart';
 import 'package:my_personal_use_app/planner/planner_service.dart';
-import 'package:my_personal_use_app/planner/task_card.dart';
 import 'package:my_personal_use_app/storage/planner_database.dart';
 import 'package:sqlite3/sqlite3.dart';
 
@@ -48,25 +47,7 @@ class PlannerHarness {
   //
   // 直接改数据库来准备 PlannerService 还没有公开接口的卡片状态。
   // 只用来准备数据，检查结果一律通过 service 的公开接口。
-  // TODO(#9, #10, #12): 对应的公开接口完成后，补充走公开接口的端到端测试。
-
-  /// 把卡片标成已完成，相当于 `completeCard`（#9）。
-  Future<void> markCompleted(String cardId) => _updateCardRow(
-    cardId,
-    TaskCardsCompanion(
-      status: const Value(CardStatus.completed),
-      completedAt: Value(_nowMillis),
-    ),
-  );
-
-  /// 把卡片标回未完成，相当于 `uncompleteCard`（#9）。
-  Future<void> markActive(String cardId) => _updateCardRow(
-    cardId,
-    const TaskCardsCompanion(
-      status: Value(CardStatus.active),
-      completedAt: Value(null),
-    ),
-  );
+  // TODO(#10, #11, #12): 对应的公开接口完成后，补充走公开接口的端到端测试。
 
   /// 把卡片放进回收站，相当于 `deleteCard`（#10）。
   Future<void> markDeleted(String cardId) =>
@@ -80,6 +61,12 @@ class PlannerHarness {
   Future<void> markMovedToDay(String cardId, DayKey dayKey) => _updateCardRow(
     cardId,
     TaskCardsCompanion(dayKey: Value(dayKey.toString())),
+  );
+
+  /// 把卡片标成顺延过，相当于顺延（#11）。
+  Future<void> markCarriedOver(String cardId) => _updateCardRow(
+    cardId,
+    const TaskCardsCompanion(carriedOver: Value(true)),
   );
 
   Future<void> _updateCardRow(String cardId, TaskCardsCompanion changes) async {

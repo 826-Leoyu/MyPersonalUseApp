@@ -477,6 +477,7 @@ void main() {
       'resizeCard': (id) =>
           harness.service.resizeCard(id, width: 300, height: 200),
       'setCardColor': (id) => harness.service.setCardColor(id, 0xFFB8D8F8),
+      'completeCard': (id) => harness.service.completeCard(id),
     };
 
     for (final MapEntry(key: name, value: write) in cardWrites.entries) {

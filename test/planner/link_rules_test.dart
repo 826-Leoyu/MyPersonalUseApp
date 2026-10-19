@@ -136,7 +136,7 @@ void main() {
 
     /// 让一张卡片变成不能连线的状态，按名字列出，每个都单独生成测试。
     final unavailable = <String, Future<void> Function(String id)>{
-      '已完成': (id) => harness.markCompleted(id),
+      '已完成': (id) => harness.service.completeCard(id),
       '在回收站里': (id) => harness.markDeleted(id),
     };
 
@@ -197,10 +197,10 @@ void main() {
       final b = await newCard('B');
       await harness.service.toggleLink(a.id, b.id);
 
-      await harness.markCompleted(b.id);
+      await harness.service.completeCard(b.id);
       expect(await linksOnBoard(), isEmpty);
 
-      await harness.markActive(b.id);
+      await harness.service.uncompleteCard(b.id);
       expect((await linksOnBoard()).single.toCardId, b.id);
     });
 
@@ -391,8 +391,8 @@ void main() {
           (Future<void> Function(String), Future<void> Function(String))
         >{
           '已完成': (
-            (id) => harness.markCompleted(id),
-            (id) => harness.markActive(id),
+            (id) => harness.service.completeCard(id),
+            (id) => harness.service.uncompleteCard(id),
           ),
           '在回收站里': (
             (id) => harness.markDeleted(id),

@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 
 import '../storage/planner_database.dart';
 import 'day_board.dart';
+import 'day_counts.dart';
 import 'day_key.dart';
 import 'link.dart';
 import 'link_kind.dart';
@@ -122,6 +123,45 @@ class PlannerService {
     );
   }
 
+  /// 完成一张卡片：它离开画布，进入当天的"已完成"列表。
+  ///
+  /// 卡片不是未完成、或者在回收站里时抛出 [InvalidState]。
+  Future<void> completeCard(String id) async {
+    await _write(() async {
+      final card = await _requireCard(id);
+      if (card.status != CardStatus.active || card.deletedAt != null) {
+        throw const InvalidState('只有画布上未完成的卡片可以完成');
+      }
+      await _updateCard(
+        id,
+        TaskCardsCompanion(
+          status: const Value(CardStatus.completed),
+          completedAt: Value(_nowMillis),
+        ),
+      );
+    });
+  }
+
+  /// 取消完成：卡片恢复为未完成，回到画布上原来的位置和层级。
+  ///
+  /// 卡片不是已完成、或者在回收站里时抛出 [InvalidState]。
+  // TODO(#12): 卡片日期早于今天时，按顺延规则立即搬到今天并生成历史记录。
+  Future<void> uncompleteCard(String id) async {
+    await _write(() async {
+      final card = await _requireCard(id);
+      if (card.status != CardStatus.completed || card.deletedAt != null) {
+        throw const InvalidState('只有已完成列表里的卡片可以取消完成');
+      }
+      await _updateCard(
+        id,
+        const TaskCardsCompanion(
+          status: Value(CardStatus.active),
+          completedAt: Value(null),
+        ),
+      );
+    });
+  }
+
   /// 在 [draggedId] 和 [targetId] 之间连线或断开。
   Future<ToggleLinkResult> toggleLink(String draggedId, String targetId) {
     return _write(() async {
@@ -225,6 +265,57 @@ class PlannerService {
     return changes.asyncMap((_) => _db.transaction(() => _loadBoard(dayKey)));
   }
 
+  /// 持续推送 [dayKey] 这一天的已完成卡片，按完成时间倒序。
+  Stream<List<TaskCard>> watchCompleted(DayKey dayKey) {
+    final query = _db.select(_db.taskCards)
+      ..where(
+        (c) =>
+            c.dayKey.equals(dayKey.toString()) &
+            c.status.equalsValue(CardStatus.completed) &
+            c.deletedAt.isNull(),
+      )
+      ..orderBy([(c) => OrderingTerm.desc(c.completedAt)]);
+    return query.watch().map((rows) => rows.map(_toCard).toList());
+  }
+
+  /// 持续推送从 [from] 到 [to]（包含两端）每一天的未完成数和已完成数。
+  /// 范围内没有卡片的日子也有一项，数量都是 0。
+  ///
+  /// [from] 晚于 [to] 时抛出 [InvalidInput]。
+  Stream<Map<DayKey, DayCounts>> watchDayCounts(DayKey from, DayKey to) {
+    if (from > to) throw const InvalidInput('开始日期不能晚于结束日期');
+    final cards = _db.taskCards;
+    final count = cards.id.count();
+    final query = _db.selectOnly(cards)
+      ..addColumns([cards.dayKey, cards.status, count])
+      ..where(
+        cards.dayKey.isBetweenValues(from.toString(), to.toString()) &
+            cards.deletedAt.isNull(),
+      )
+      ..groupBy([cards.dayKey, cards.status]);
+    return query.watch().map((rows) {
+      final active = <DayKey, int>{};
+      final completed = <DayKey, int>{};
+      for (final row in rows) {
+        final day = DayKey.parse(row.read(cards.dayKey)!);
+        final byStatus = switch (cards.status.converter.fromSql(
+          row.read(cards.status)!,
+        )) {
+          CardStatus.active => active,
+          CardStatus.completed => completed,
+        };
+        byStatus[day] = row.read(count)!;
+      }
+      return {
+        for (var day = from; day <= to; day = day.addDays(1))
+          day: DayCounts(
+            activeCount: active[day] ?? 0,
+            completedCount: completed[day] ?? 0,
+          ),
+      };
+    });
+  }
+
   Future<DayBoard> _loadBoard(DayKey dayKey) async {
     final cardRows =
         await (_db.select(_db.taskCards)
@@ -246,9 +337,18 @@ class PlannerService {
                   l.toCardId.isIn(cardIds),
             ))
             .get();
+    final completedCount = _db.taskCards.id.count();
+    final countQuery = _db.selectOnly(_db.taskCards)
+      ..addColumns([completedCount])
+      ..where(
+        _db.taskCards.dayKey.equals(dayKey.toString()) &
+            _db.taskCards.status.equalsValue(CardStatus.completed) &
+            _db.taskCards.deletedAt.isNull(),
+      );
     return DayBoard(
       cards: cardRows.map(_toCard).toList(),
       links: linkRows.map(_toLink).toList(),
+      completedCount: (await countQuery.getSingle()).read(completedCount)!,
     );
   }
 
