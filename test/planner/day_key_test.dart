@@ -7,6 +7,10 @@ void main() {
     test('从 YYYY-MM-DD 文本解析后再输出得到同样的文本', () {
       expect(DayKey.parse('2026-10-20').toString(), '2026-10-20');
     });
+
+    test('闰年的 2 月 29 日可以正常解析', () {
+      expect(DayKey.parse('2028-02-29').toString(), '2028-02-29');
+    });
   });
 
   group('DayKey 拒绝无效文本', () {
@@ -38,13 +42,11 @@ void main() {
         '2026-10-20T00:00',
         '2026-10-20-01',
         '+2026-10-20',
+        '2026-10-20\n',
+        '２０２６-10-20',
       ]) {
         expect(() => DayKey.parse(text), throwsFormatException, reason: text);
       }
-    });
-
-    test('闰年的 2 月 29 日可以正常解析', () {
-      expect(DayKey.parse('2028-02-29').toString(), '2028-02-29');
     });
   });
 
@@ -124,12 +126,20 @@ void main() {
       expect(nov1 <= oct31, isFalse);
     });
 
-    test('同一天既大于等于又小于等于自己，但不严格大于或小于', () {
+    test('同一天既大于等于又小于等于自己', () {
       final day = DayKey.parse('2026-10-20');
       final sameDay = DayKey.parse('2026-10-20');
 
-      expect(day <= sameDay && day >= sameDay, isTrue);
-      expect(day < sameDay || day > sameDay, isFalse);
+      expect(day <= sameDay, isTrue);
+      expect(day >= sameDay, isTrue);
+    });
+
+    test('同一天不严格大于也不严格小于自己', () {
+      final day = DayKey.parse('2026-10-20');
+      final sameDay = DayKey.parse('2026-10-20');
+
+      expect(day < sameDay, isFalse);
+      expect(day > sameDay, isFalse);
     });
 
     test('排序后按时间先后排列，跨年也正确', () {
