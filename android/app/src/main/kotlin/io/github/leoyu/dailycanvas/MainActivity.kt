@@ -1,4 +1,4 @@
-package com.example.my_personal_use_app
+package io.github.leoyu.dailycanvas
 
 import io.flutter.embedding.android.FlutterActivity
 
