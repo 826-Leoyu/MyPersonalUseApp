@@ -9,6 +9,45 @@ void main() {
     });
   });
 
+  group('DayKey 拒绝无效文本', () {
+    test('不存在的日期抛出 FormatException', () {
+      expect(() => DayKey.parse('2026-02-30'), throwsFormatException);
+    });
+
+    test('不存在的月份抛出 FormatException', () {
+      expect(() => DayKey.parse('2026-13-01'), throwsFormatException);
+      expect(() => DayKey.parse('2026-00-10'), throwsFormatException);
+    });
+
+    test('平年的 2 月 29 日抛出 FormatException', () {
+      expect(() => DayKey.parse('2026-02-29'), throwsFormatException);
+    });
+
+    test('月份或日期没有补零时抛出 FormatException', () {
+      expect(() => DayKey.parse('2026-1-05'), throwsFormatException);
+      expect(() => DayKey.parse('2026-01-5'), throwsFormatException);
+    });
+
+    test('不是 YYYY-MM-DD 结构的文本抛出 FormatException', () {
+      for (final text in [
+        '',
+        '20261020',
+        '2026/10/20',
+        '26-10-20',
+        ' 2026-10-20',
+        '2026-10-20T00:00',
+        '2026-10-20-01',
+        '+2026-10-20',
+      ]) {
+        expect(() => DayKey.parse(text), throwsFormatException, reason: text);
+      }
+    });
+
+    test('闰年的 2 月 29 日可以正常解析', () {
+      expect(DayKey.parse('2028-02-29').toString(), '2028-02-29');
+    });
+  });
+
   group('DayKey 从时间生成', () {
     test('本地时间的年月日就是 dayKey', () {
       expect(
@@ -82,8 +121,15 @@ void main() {
 
       expect(oct31 < nov1, isTrue);
       expect(nov1 > oct31, isTrue);
-      expect(oct31 >= oct31, isTrue);
       expect(nov1 <= oct31, isFalse);
+    });
+
+    test('同一天既大于等于又小于等于自己，但不严格大于或小于', () {
+      final day = DayKey.parse('2026-10-20');
+      final sameDay = DayKey.parse('2026-10-20');
+
+      expect(day <= sameDay && day >= sameDay, isTrue);
+      expect(day < sameDay || day > sameDay, isFalse);
     });
 
     test('排序后按时间先后排列，跨年也正确', () {

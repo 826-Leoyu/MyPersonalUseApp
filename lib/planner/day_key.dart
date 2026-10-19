@@ -13,14 +13,25 @@ class DayKey implements Comparable<DayKey> {
   /// 今天的 dayKey，由注入的 [clock] 决定，不直接读系统时间。
   factory DayKey.today() => DayKey.fromDateTime(clock.now());
 
+  /// 解析 `YYYY-MM-DD` 文本；格式不对或日期不存在时抛出 [FormatException]。
   factory DayKey.parse(String text) {
-    final parts = text.split('-');
-    return DayKey(
-      int.parse(parts[0]),
-      int.parse(parts[1]),
-      int.parse(parts[2]),
+    final match = _pattern.firstMatch(text);
+    if (match == null) {
+      throw FormatException('应为 YYYY-MM-DD 格式', text);
+    }
+    final key = DayKey(
+      int.parse(match[1]!),
+      int.parse(match[2]!),
+      int.parse(match[3]!),
     );
+    final normalized = DateTime.utc(key.year, key.month, key.day);
+    if (normalized.month != key.month || normalized.day != key.day) {
+      throw FormatException('不存在的日期', text);
+    }
+    return key;
   }
+
+  static final _pattern = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$');
 
   final int year;
   final int month;
