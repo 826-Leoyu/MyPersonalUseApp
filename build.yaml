@@ -1,0 +1,7 @@
+targets:
+  $default:
+    builders:
+      drift_dev:
+        options:
+          # 只通过 PlannerService 访问数据库，不需要 drift 的 manager API
+          generate_manager: false
