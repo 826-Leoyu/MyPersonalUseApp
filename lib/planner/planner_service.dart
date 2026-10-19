@@ -165,19 +165,17 @@ class PlannerService {
       if (await _activeLinkBetween(link.fromCardId, link.toCardId) != null) {
         throw const InvalidState('这两张卡片之间已经有另一条连线');
       }
-      await (_db.update(_db.links)..where((l) => l.id.equals(linkId))).write(
-        LinksCompanion(
-          deletedAt: const Value(null),
-          updatedAt: Value(_nowMillis),
-        ),
-      );
+      await _updateLink(linkId, const LinksCompanion(deletedAt: Value(null)));
     });
   }
 
-  Future<void> _softDeleteLink(String linkId) async {
-    final now = _nowMillis;
+  Future<void> _softDeleteLink(String linkId) =>
+      _updateLink(linkId, LinksCompanion(deletedAt: Value(_nowMillis)));
+
+  /// 修改一条连线并刷新 updatedAt。调用前已确认连线存在。
+  Future<void> _updateLink(String linkId, LinksCompanion changes) async {
     await (_db.update(_db.links)..where((l) => l.id.equals(linkId))).write(
-      LinksCompanion(deletedAt: Value(now), updatedAt: Value(now)),
+      changes.copyWith(updatedAt: Value(_nowMillis)),
     );
   }
 
@@ -219,6 +217,8 @@ class PlannerService {
 
   /// 持续推送 [dayKey] 这一天画布上要显示的内容。卡片或连线变化时都会推送。
   Stream<DayBoard> watchDay(DayKey dayKey) {
+    // 画布内容来自卡片和连线两张表，用一个只声明 readsFrom 的查询监听
+    // 两张表的变化，每次变化时在一个事务里重新读出完整的画布，保证一致。
     final changes = _db
         .customSelect('SELECT 1', readsFrom: {_db.taskCards, _db.links})
         .watch();

@@ -260,6 +260,23 @@ void main() {
 
       await expectation;
     });
+
+    test('点击断开和撤销断开时推送新的画布内容', () async {
+      final a = await newCard('A');
+      final b = await newCard('B');
+      final created = await harness.service.toggleLink(a.id, b.id);
+      final linkCounts = harness.service
+          .watchDay(harness.today)
+          .map((board) => board.links.length);
+      final expectation = expectLater(linkCounts, emitsInOrder([1, 0, 1]));
+      await pumpEventQueue();
+
+      await harness.service.removeLink(created.linkId);
+      await pumpEventQueue();
+      await harness.service.restoreLink(created.linkId);
+
+      await expectation;
+    });
   });
 
   group('点击断开连线', () {
@@ -413,8 +430,8 @@ void main() {
     });
   });
 
-  group('连线的存储', () {
-    test('重建 service 后，连线和断开的状态都还在', () async {
+  group('连线的持久化', () {
+    test('重建 service 后，连线还在，断开的连线仍然不显示', () async {
       final a = await newCard('A');
       final b = await newCard('B');
       final c = await newCard('C');
@@ -427,10 +444,22 @@ void main() {
       final link = (await linksOnBoard()).single;
       expect(link.id, kept.linkId);
       expect((link.fromCardId, link.toCardId), (a.id, b.id));
-      await harness.service.restoreLink(removed.linkId);
-      expect(await linksOnBoard(), hasLength(2));
     });
 
+    test('重建 service 后，之前断开的连线仍然可以恢复', () async {
+      final a = await newCard('A');
+      final b = await newCard('B');
+      final created = await harness.service.toggleLink(a.id, b.id);
+      await harness.service.removeLink(created.linkId);
+
+      await harness.reopen();
+      await harness.service.restoreLink(created.linkId);
+
+      expect((await linksOnBoard()).single.id, created.linkId);
+    });
+  });
+
+  group('连线写入失败', () {
     test('写入失败时新建连线抛出 StorageFailure，画布上没有新连线', () async {
       final a = await newCard('A');
       final b = await newCard('B');
