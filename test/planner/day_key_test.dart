@@ -68,7 +68,10 @@ void main() {
 
     test('存在的日期可以直接构造，和解析文本得到的结果相等', () {
       expect(DayKey(2026, 10, 20), DayKey.parse('2026-10-20'));
-      expect(DayKey(2028, 2, 29), DayKey.parse('2028-02-29'));
+    });
+
+    test('闰年的 2 月 29 日可以直接构造', () {
+      expect(DayKey(2028, 2, 29).toString(), '2028-02-29');
     });
   });
 
