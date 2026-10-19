@@ -268,13 +268,12 @@ class PlannerService {
   /// 持续推送 [dayKey] 这一天的已完成卡片，按完成时间倒序。
   Stream<List<TaskCard>> watchCompleted(DayKey dayKey) {
     final query = _db.select(_db.taskCards)
-      ..where(
-        (c) =>
-            c.dayKey.equals(dayKey.toString()) &
-            c.status.equalsValue(CardStatus.completed) &
-            c.deletedAt.isNull(),
-      )
-      ..orderBy([(c) => OrderingTerm.desc(c.completedAt)]);
+      ..where((c) => _completedOn(c, dayKey))
+      // 同一毫秒完成的卡片按 id 排，保证顺序稳定。
+      ..orderBy([
+        (c) => OrderingTerm.desc(c.completedAt),
+        (c) => OrderingTerm.asc(c.id),
+      ]);
     return query.watch().map((rows) => rows.map(_toCard).toList());
   }
 
@@ -337,20 +336,22 @@ class PlannerService {
                   l.toCardId.isIn(cardIds),
             ))
             .get();
-    final completedCount = _db.taskCards.id.count();
+    final count = _db.taskCards.id.count();
     final countQuery = _db.selectOnly(_db.taskCards)
-      ..addColumns([completedCount])
-      ..where(
-        _db.taskCards.dayKey.equals(dayKey.toString()) &
-            _db.taskCards.status.equalsValue(CardStatus.completed) &
-            _db.taskCards.deletedAt.isNull(),
-      );
+      ..addColumns([count])
+      ..where(_completedOn(_db.taskCards, dayKey));
     return DayBoard(
       cards: cardRows.map(_toCard).toList(),
       links: linkRows.map(_toLink).toList(),
-      completedCount: (await countQuery.getSingle()).read(completedCount)!,
+      completedCount: (await countQuery.getSingle()).read(count)!,
     );
   }
+
+  /// [dayKey] 这一天"已完成"列表里的卡片：已完成、不在回收站。
+  static Expression<bool> _completedOn($TaskCardsTable c, DayKey dayKey) =>
+      c.dayKey.equals(dayKey.toString()) &
+      c.status.equalsValue(CardStatus.completed) &
+      c.deletedAt.isNull();
 
   /// 卡片当前的日期、状态、是否在回收站；找不到时抛出 [NotFound]。
   Future<CardLocation> findCard(String id) async {

@@ -15,6 +15,10 @@ void main() {
   Future<TaskCard> newCard([String title = '卡片']) =>
       harness.service.createCard(harness.today, x: 0, y: 0, title: title);
 
+  /// 在 [day] 那一天的画布上新建一张卡片。
+  Future<TaskCard> cardOn(DayKey day, String title) =>
+      harness.service.createCard(day, x: 0, y: 0, title: title);
+
   group('完成', () {
     test('完成后卡片从画布上消失，出现在当天的已完成列表里，带完成时间', () async {
       final card = await newCard('买菜');
@@ -95,12 +99,7 @@ void main() {
       final kept = await newCard('留下');
       final trashed = await newCard('删除');
       await newCard('没完成');
-      final tomorrow = await harness.service.createCard(
-        harness.today.addDays(1),
-        x: 0,
-        y: 0,
-        title: '明天',
-      );
+      final tomorrow = await cardOn(harness.today.addDays(1), '明天');
       for (final card in [kept, trashed, tomorrow]) {
         await harness.service.completeCard(card.id);
       }
@@ -140,12 +139,7 @@ void main() {
       final cards = [
         for (final t in ['A', 'B', 'C', 'D']) await newCard(t),
       ];
-      final tomorrow = await service.createCard(
-        harness.today.addDays(1),
-        x: 0,
-        y: 0,
-        title: '明天',
-      );
+      final tomorrow = await cardOn(harness.today.addDays(1), '明天');
       expect((await service.watchDay(harness.today).first).completedCount, 0);
 
       for (final card in [...cards.take(3), tomorrow]) {
@@ -186,9 +180,6 @@ void main() {
                 (day, c) => MapEntry(day, (c.activeCount, c.completedCount)),
               ),
             );
-
-    Future<TaskCard> cardOn(DayKey day, String title) =>
-        harness.service.createCard(day, x: 0, y: 0, title: title);
 
     test('范围内每天都有未完成数和已完成数，没有卡片的日子是 0', () async {
       final today = harness.today;
