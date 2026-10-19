@@ -91,15 +91,18 @@ void main() {
       );
     });
 
-    test('标题按字符计数，一个表情算一个字', () async {
-      final card = await harness.service.createCard(
-        harness.today,
-        x: 0,
-        y: 0,
-        title: '😀' * 200,
-      );
+    test('标题按看到的字计数，一个表情算一个字', () async {
+      // 👨‍👩‍👧 由 5 个码点组成，👍🏽 由 2 个码点组成
+      for (final emoji in ['😀', '👨‍👩‍👧', '👍🏽']) {
+        final card = await harness.service.createCard(
+          harness.today,
+          x: 0,
+          y: 0,
+          title: emoji * 200,
+        );
 
-      expect(card.title, '😀' * 200);
+        expect(card.title, emoji * 200, reason: emoji);
+      }
     });
 
     test('在过去的日期新建卡片被拒绝，那天的画布上没有新卡片', () async {
@@ -261,6 +264,18 @@ void main() {
         throwsA(isA<InvalidInput>()),
       );
       expect((await cardOnBoard(card.id)).note, hasLength(5000));
+    });
+
+    test('备注按看到的字计数，一个表情算一个字', () async {
+      final card = await newCard();
+
+      await harness.service.updateCardContent(
+        card.id,
+        title: '卡片',
+        note: '👨‍👩‍👧' * 5000,
+      );
+
+      expect((await cardOnBoard(card.id)).note, '👨‍👩‍👧' * 5000);
     });
 
     test('卡片不存在时报 NotFound', () async {
@@ -454,6 +469,39 @@ void main() {
   });
 
   group('存储失败', () {
+    /// 修改已有卡片的写操作，按名字列出，每个都单独生成测试。
+    final cardWrites = <String, Future<void> Function(String id)>{
+      'updateCardContent': (id) =>
+          harness.service.updateCardContent(id, title: '新标题', note: '备注'),
+      'moveCard': (id) => harness.service.moveCard(id, x: 500, y: 500),
+      'resizeCard': (id) =>
+          harness.service.resizeCard(id, width: 300, height: 200),
+      'setCardColor': (id) => harness.service.setCardColor(id, 0xFFB8D8F8),
+    };
+
+    for (final MapEntry(key: name, value: write) in cardWrites.entries) {
+      test('写入失败时 $name 抛出 StorageFailure，卡片保持原样', () async {
+        final card = await newCard(title: '买菜');
+        harness.failWrites = true;
+
+        await expectLater(write(card.id), throwsA(isA<StorageFailure>()));
+
+        final unchanged = await cardOnBoard(card.id);
+        expect(unchanged.title, '买菜');
+        expect(unchanged.note, isNull);
+        expect((unchanged.x, unchanged.y), (0, 0));
+        expect(unchanged.zIndex, card.zIndex);
+        expect((unchanged.width, unchanged.height), (180, 88));
+        expect(unchanged.colorArgb, 0xFFFFF3B0);
+      });
+
+      test('写入失败时 $name 遇到不存在的卡片仍然报 NotFound', () async {
+        harness.failWrites = true;
+
+        await expectLater(write('不存在'), throwsA(isA<NotFound>()));
+      });
+    }
+
     test('写入失败时新建卡片抛出 StorageFailure，画布上没有新卡片', () async {
       harness.failWrites = true;
 
@@ -461,36 +509,6 @@ void main() {
 
       final board = await harness.service.watchDay(harness.today).first;
       expect(board.cards, isEmpty);
-    });
-
-    test('写入失败时修改卡片的操作都抛出 StorageFailure，卡片保持原样', () async {
-      final card = await newCard(title: '买菜');
-      final service = harness.service;
-      harness.failWrites = true;
-
-      final writes = <String, Future<void> Function()>{
-        'updateCardContent': () =>
-            service.updateCardContent(card.id, title: '新标题', note: '备注'),
-        'moveCard': () => service.moveCard(card.id, x: 500, y: 500),
-        'resizeCard': () =>
-            service.resizeCard(card.id, width: 300, height: 200),
-        'setCardColor': () => service.setCardColor(card.id, 0xFFB8D8F8),
-      };
-      for (final MapEntry(key: name, value: write) in writes.entries) {
-        await expectLater(
-          write(),
-          throwsA(isA<StorageFailure>()),
-          reason: name,
-        );
-      }
-
-      final unchanged = await cardOnBoard(card.id);
-      expect(unchanged.title, '买菜');
-      expect(unchanged.note, isNull);
-      expect((unchanged.x, unchanged.y), (0, 0));
-      expect(unchanged.zIndex, card.zIndex);
-      expect((unchanged.width, unchanged.height), (180, 88));
-      expect(unchanged.colorArgb, 0xFFFFF3B0);
     });
 
     test('存储恢复正常后可以继续写入', () async {
@@ -508,15 +526,6 @@ void main() {
       harness.failWrites = true;
 
       await expectLater(newCard(title: ' '), throwsA(isA<InvalidInput>()));
-    });
-
-    test('卡片不存在时仍然报 NotFound，而不是 StorageFailure', () async {
-      harness.failWrites = true;
-
-      await expectLater(
-        harness.service.moveCard('不存在', x: 0, y: 0),
-        throwsA(isA<NotFound>()),
-      );
     });
   });
 }

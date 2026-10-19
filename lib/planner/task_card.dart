@@ -1,5 +1,6 @@
 import 'day_key.dart';
 
+/// 卡片状态：未完成或已完成。在回收站里由 [TaskCard.deletedAt] 表示。
 enum CardStatus { active, completed }
 
 /// 一张任务卡片。这是全局唯一的有效任务；时间都是 UTC。

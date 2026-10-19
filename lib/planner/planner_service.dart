@@ -1,3 +1,4 @@
+import 'package:characters/characters.dart';
 import 'package:clock/clock.dart';
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
@@ -66,7 +67,7 @@ class PlannerService {
     required String? note,
   }) async {
     final cleanTitle = _validTitle(title);
-    if (note != null && note.runes.length > maxNoteLength) {
+    if (note != null && note.characters.length > maxNoteLength) {
       throw const InvalidInput('备注最多 $maxNoteLength 个字');
     }
     await _write(
@@ -157,12 +158,13 @@ class PlannerService {
   }
 
   /// 修改一张卡片并刷新 updatedAt；卡片不存在时抛出 [NotFound]。
+  ///
+  /// 先读后写，这样即使存储写入失败，找不到卡片时也报 [NotFound]。
   Future<void> _updateCard(String id, TaskCardsCompanion changes) async {
-    final updated =
-        await (_db.update(_db.taskCards)..where((c) => c.id.equals(id))).write(
-          changes.copyWith(updatedAt: Value(_nowMillis)),
-        );
-    if (updated == 0) throw NotFound('找不到卡片 $id');
+    await _requireCard(id);
+    await (_db.update(_db.taskCards)..where((c) => c.id.equals(id))).write(
+      changes.copyWith(updatedAt: Value(_nowMillis)),
+    );
   }
 
   Future<TaskCard> _requireCard(String id) async {
@@ -187,11 +189,12 @@ class PlannerService {
 
   DayKey get _today => DayKey.fromDateTime(_clock.now());
 
-  /// 去掉首尾空格后的标题；为空或超过 [maxTitleLength] 个字符时抛出 [InvalidInput]。
+  /// 去掉首尾空格后的标题；为空或超过 [maxTitleLength] 个字时抛出 [InvalidInput]。
+  /// 按看到的字（字形簇）计数，一个组合表情算一个字。
   static String _validTitle(String title) {
     final trimmed = title.trim();
     if (trimmed.isEmpty) throw const InvalidInput('标题不能为空');
-    if (trimmed.runes.length > maxTitleLength) {
+    if (trimmed.characters.length > maxTitleLength) {
       throw const InvalidInput('标题最多 $maxTitleLength 个字');
     }
     return trimmed;
