@@ -2,12 +2,20 @@ import 'package:clock/clock.dart';
 
 /// 按本地时区计算的某一天，存储格式为 `YYYY-MM-DD`。
 class DayKey implements Comparable<DayKey> {
-  const DayKey(this.year, this.month, this.day);
+  /// 创建某一天；日期不存在时抛出 [ArgumentError]。
+  factory DayKey(int year, int month, int day) {
+    if (!_exists(year, month, day)) {
+      throw ArgumentError('不存在的日期：$year-$month-$day');
+    }
+    return DayKey._(year, month, day);
+  }
+
+  const DayKey._(this.year, this.month, this.day);
 
   /// 取 [time] 在本地时区的年月日；UTC 时间会先换算成本地时间。
   factory DayKey.fromDateTime(DateTime time) {
     final local = time.toLocal();
-    return DayKey(local.year, local.month, local.day);
+    return DayKey._(local.year, local.month, local.day);
   }
 
   /// 今天的 dayKey，由注入的 [clock] 决定，不直接读系统时间。
@@ -19,19 +27,22 @@ class DayKey implements Comparable<DayKey> {
     if (match == null) {
       throw FormatException('应为 YYYY-MM-DD 格式', text);
     }
-    final key = DayKey(
-      int.parse(match[1]!),
-      int.parse(match[2]!),
-      int.parse(match[3]!),
-    );
-    final normalized = DateTime.utc(key.year, key.month, key.day);
-    if (normalized.month != key.month || normalized.day != key.day) {
+    final year = int.parse(match[1]!);
+    final month = int.parse(match[2]!);
+    final day = int.parse(match[3]!);
+    if (!_exists(year, month, day)) {
       throw FormatException('不存在的日期', text);
     }
-    return key;
+    return DayKey._(year, month, day);
   }
 
   static final _pattern = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$');
+
+  /// 年月日组合起来是否是日历上真实存在的一天。
+  static bool _exists(int year, int month, int day) {
+    final normalized = DateTime.utc(year, month, day);
+    return normalized.month == month && normalized.day == day;
+  }
 
   final int year;
   final int month;
@@ -40,7 +51,7 @@ class DayKey implements Comparable<DayKey> {
   /// 向后（[days] 为负时向前）移动若干天。用 UTC 计算以避开夏令时。
   DayKey addDays(int days) {
     final shifted = DateTime.utc(year, month, day + days);
-    return DayKey(shifted.year, shifted.month, shifted.day);
+    return DayKey._(shifted.year, shifted.month, shifted.day);
   }
 
   @override

@@ -50,6 +50,31 @@ void main() {
     });
   });
 
+  group('DayKey 直接构造', () {
+    test('不存在的日期抛出 ArgumentError', () {
+      expect(() => DayKey(2026, 2, 30), throwsArgumentError);
+    });
+
+    test('月份或日期超出范围时抛出 ArgumentError', () {
+      expect(() => DayKey(2026, 13, 1), throwsArgumentError);
+      expect(() => DayKey(2026, 0, 10), throwsArgumentError);
+      expect(() => DayKey(2026, 10, 0), throwsArgumentError);
+      expect(() => DayKey(2026, 10, -1), throwsArgumentError);
+    });
+
+    test('平年的 2 月 29 日抛出 ArgumentError', () {
+      expect(() => DayKey(2026, 2, 29), throwsArgumentError);
+    });
+
+    test('存在的日期可以直接构造，和解析文本得到的结果相等', () {
+      expect(DayKey(2026, 10, 20), DayKey.parse('2026-10-20'));
+    });
+
+    test('闰年的 2 月 29 日可以直接构造', () {
+      expect(DayKey(2028, 2, 29).toString(), '2028-02-29');
+    });
+  });
+
   group('DayKey 从时间生成', () {
     test('本地时间的年月日就是 dayKey', () {
       expect(
