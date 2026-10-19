@@ -31,6 +31,18 @@ CLAUDE.local.md
 build/
 coverage/
 *.g.dart.tmp
+.widget_preview/
+migrate_working_dir/
+**/doc/api/
+.history
+.buildlog/
+*.swp
+*.class
+*.pyc
+
+# Symbolication / obfuscation output
+app.*.symbols
+app.*.map.json
 
 # Android
 **/android/.gradle/
