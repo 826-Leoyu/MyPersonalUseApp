@@ -61,10 +61,10 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
 
   /// 拖动卡片的状态机，和正在拖卡片的指针。
   final _drag = CardDragMachine();
-  int? _dragPointer;
+  int? _dragPointerId;
 
   /// 松手后正在保存的新位置；保存好的位置从数据库回来后清掉。
-  ({String cardId, Offset position})? _dropping;
+  CardDrop? _dropping;
 
   BoardSelectionController get _selection =>
       ref.read(boardSelectionProvider.notifier);
@@ -118,48 +118,55 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
   /// 按在卡片上的指针事件交给拖动状态机。同一时间只跟踪一个指针。
   void _onCardPointer(TaskCard card, PointerEvent event) {
     switch (event) {
-      case PointerDownEvent() when _dragPointer == null:
+      case PointerDownEvent() when _dragPointerId == null:
         // 桌面上只有鼠标左键能拖；触摸也算左键。
         if (event.buttons != kPrimaryButton) return;
-        _dragPointer = event.pointer;
+        _dragPointerId = event.pointer;
         _drag.down(
           card.id,
           origin: Offset(card.x, card.y),
           pointer: _globalToCanvas(event.position),
           at: event.timeStamp,
-          slop: computePanSlop(
-            event.kind,
-            MediaQuery.maybeGestureSettingsOf(context),
-          ),
+          // 判定距离是屏幕上的距离，换算成画布上的距离。
+          slop:
+              computePanSlop(
+                event.kind,
+                MediaQuery.maybeGestureSettingsOf(context),
+              ) /
+              _transform.value.getMaxScaleOnAxis(),
         );
-      case PointerMoveEvent() when event.pointer == _dragPointer:
+      case PointerMoveEvent() when event.pointer == _dragPointerId:
         setState(
           () =>
               _drag.move(_globalToCanvas(event.position), at: event.timeStamp),
         );
-      case PointerUpEvent() when event.pointer == _dragPointer:
-        _dragPointer = null;
+      case PointerUpEvent() when event.pointer == _dragPointerId:
+        _dragPointerId = null;
         final drop = _drag.up();
-        if (drop != null) _moveCard(drop.cardId, drop.position);
-      case PointerCancelEvent() when event.pointer == _dragPointer:
+        if (drop != null) _moveCard(drop);
+      case PointerCancelEvent() when event.pointer == _dragPointerId:
         _onCardDragCancel();
     }
   }
 
   /// 卡片的手势被别的操作抢走（比如捏合缩放画布）：卡片回到原处。
   void _onCardDragCancel() {
-    _dragPointer = null;
+    _dragPointerId = null;
     setState(_drag.cancel);
   }
 
   /// 保存拖动后的位置。保存好之前卡片停在新位置；保存失败时回到原处。
-  Future<void> _moveCard(String cardId, Offset position) async {
-    setState(() => _dropping = (cardId: cardId, position: position));
+  Future<void> _moveCard(CardDrop drop) async {
+    final (:cardId, :position) = drop;
+    setState(() => _dropping = drop);
     final saved = await _save(() async {
       final service = await ref.read(plannerServiceProvider.future);
       await service.moveCard(cardId, x: position.dx, y: position.dy);
     });
-    if (!saved && mounted) setState(() => _dropping = null);
+    // 只清自己这张；保存期间可能又拖了另一张卡片。
+    if (!saved && mounted && _dropping?.cardId == cardId) {
+      setState(() => _dropping = null);
+    }
   }
 
   @override
@@ -198,13 +205,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
     final cards = widget.board.cards;
     final selection = ref.watch(boardSelectionProvider);
     // 正在拖动、或者刚松手还在保存的卡片：显示在临时位置，画在所有卡片上面。
-    final lifted = switch (_drag.state) {
-      CardDragging(:final cardId, :final position) => (
-        cardId: cardId,
-        position: position,
-      ),
-      _ => _dropping,
-    };
+    final lifted = _drag.dragged ?? _dropping;
     final ordered = [
       ...cards.where((c) => c.id != lifted?.cardId),
       ...cards.where((c) => c.id == lifted?.cardId),
@@ -247,7 +248,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
                         selection is EditingCard && selection.cardId == card.id
                         ? selection
                         : null,
-                    position: card.id == lifted?.cardId
+                    liftedPosition: card.id == lifted?.cardId
                         ? lifted!.position
                         : null,
                     onTap: () => _save(() => _selection.tapCard(card)),
@@ -303,7 +304,7 @@ class _CardView extends StatefulWidget {
     required this.card,
     required this.selected,
     required this.editing,
-    required this.position,
+    required this.liftedPosition,
     required this.onTap,
     required this.onDragPointer,
     required this.onDragCancel,
@@ -318,7 +319,7 @@ class _CardView extends StatefulWidget {
   final EditingCard? editing;
 
   /// 拖动中或者刚拖完还没保存好时，卡片左上角的临时位置；平时为 null。
-  final Offset? position;
+  final Offset? liftedPosition;
 
   final VoidCallback onTap;
 
@@ -392,10 +393,12 @@ class _CardViewState extends State<_CardView> {
   Widget build(BuildContext context) {
     final card = widget.card;
     final editing = widget.editing;
+    // 正在编辑的卡片不能拖。
+    final onDragPointer = editing == null ? widget.onDragPointer : null;
     return Positioned(
       key: BoardCanvas.cardKey(card.id),
-      left: widget.position?.dx ?? card.x,
-      top: widget.position?.dy ?? card.y,
+      left: widget.liftedPosition?.dx ?? card.x,
+      top: widget.liftedPosition?.dy ?? card.y,
       width: _resizing?.width ?? card.width,
       height: _resizing?.height ?? card.height,
       child: GestureDetector(
@@ -414,10 +417,10 @@ class _CardViewState extends State<_CardView> {
             Positioned.fill(
               // 手柄盖在卡片上面，按在手柄上不会走到这里。
               child: Listener(
-                onPointerDown: editing == null ? widget.onDragPointer : null,
-                onPointerMove: editing == null ? widget.onDragPointer : null,
-                onPointerUp: editing == null ? widget.onDragPointer : null,
-                onPointerCancel: editing == null ? widget.onDragPointer : null,
+                onPointerDown: onDragPointer,
+                onPointerMove: onDragPointer,
+                onPointerUp: onDragPointer,
+                onPointerCancel: onDragPointer,
                 child: _CardFrame(
                   colorArgb: card.colorArgb,
                   child: switch (editing) {

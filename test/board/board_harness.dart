@@ -46,9 +46,11 @@ class BoardHarness {
   Clock get _clock => Clock(() => now);
 
   /// 在共用的内存数据库上新建一个连接。
-  PlannerDatabase _newConnection() => PlannerDatabase(
-    NativeDatabase.opened(_sqlite, closeUnderlyingOnClose: false),
-  );
+  QueryExecutor _connect() =>
+      NativeDatabase.opened(_sqlite, closeUnderlyingOnClose: false);
+
+  /// 给 seed 和 readBoard 用的连接，写入不会被模拟成失败。
+  PlannerDatabase _newConnection() => PlannerDatabase(_connect());
 
   /// 注入给 App 的数据库工厂。
   PlannerDatabase _openDatabase() {
@@ -56,12 +58,7 @@ class BoardHarness {
       failingOpens--;
       return PlannerDatabase(LazyDatabase(() => throw Exception('模拟的数据库打不开')));
     }
-    return PlannerDatabase(
-      NativeDatabase.opened(
-        _sqlite,
-        closeUnderlyingOnClose: false,
-      ).interceptWith(_failingWrites),
-    );
+    return PlannerDatabase(_connect().interceptWith(_failingWrites));
   }
 
   /// 在启动 App 之前准备数据。

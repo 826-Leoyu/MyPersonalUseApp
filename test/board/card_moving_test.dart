@@ -85,9 +85,8 @@ void main() {
     await harness.dispose(tester);
   });
 
-  testWidgets('画布放大后拖动卡片，移动距离按缩放比例换算', (tester) async {
-    final card = await seedCard(tester);
-    await harness.launch(tester);
+  /// 以卡片中心为中心，用 Ctrl+滚轮把画布放大，返回放大后的缩放比例。
+  Future<double> zoomInOn(WidgetTester tester, TaskCard card) async {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     final mouse = TestPointer(1, PointerDeviceKind.mouse);
     await tester.sendEventToBinding(
@@ -99,12 +98,44 @@ void main() {
     final scale =
         tester.getRect(cardFinder(card)).width / TaskCard.defaultWidth;
     expect(scale, greaterThan(1));
+    return scale;
+  }
+
+  testWidgets('画布放大后拖动卡片，移动距离按缩放比例换算', (tester) async {
+    final card = await seedCard(tester);
+    await harness.launch(tester);
+    final scale = await zoomInOn(tester, card);
 
     await dragCard(tester, card, Offset(80 * scale, 40 * scale));
 
     final saved = await savedCard(tester, card);
     expect(saved.x, moreOrLessEquals(card.x + 80));
     expect(saved.y, moreOrLessEquals(card.y + 40));
+
+    await harness.dispose(tester);
+  });
+
+  testWidgets('画布放大后慢慢拖，在屏幕上移动超过判定距离就开始拖动', (tester) async {
+    final card = await seedCard(tester);
+    await harness.launch(tester);
+    final scale = await zoomInOn(tester, card);
+    final start = tester.getCenter(cardFinder(card));
+
+    // 先在屏幕上刚好移动超过判定距离，过一会儿再接着移动。
+    final gesture = await tester.startGesture(start);
+    await gesture.moveBy(
+      const Offset(kPanSlop + 4, 0),
+      timeStamp: const Duration(milliseconds: 100),
+    );
+    await gesture.moveBy(
+      const Offset(60, 0),
+      timeStamp: const Duration(milliseconds: 700),
+    );
+    await gesture.up();
+    await harness.settle(tester);
+
+    final saved = await savedCard(tester, card);
+    expect(saved.x, moreOrLessEquals(card.x + (kPanSlop + 64) / scale));
 
     await harness.dispose(tester);
   });

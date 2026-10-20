@@ -6,7 +6,11 @@
 library;
 
 import 'dart:math' as math;
-import 'dart:ui';
+
+import 'package:flutter/gestures.dart';
+
+/// 一张正在拖动、或者拖完要保存的卡片，和它左上角的位置。
+typedef CardDrop = ({String cardId, Offset position});
 
 /// 拖动状态。
 sealed class CardDragState {
@@ -68,12 +72,24 @@ final class CardLongPressed extends CardDragState {
 
 /// 驱动拖动状态：输入指针的位置和时间，输出 [state]。
 class CardDragMachine {
-  /// 按住这么久没有移动就是长按（spec：500ms）。
-  static const longPressTimeout = Duration(milliseconds: 500);
+  /// 按住这么久没有移动就是长按（spec：500ms），和 Flutter 的长按手势一致。
+  ///
+  /// App 里卡片上注册了长按手势，按住不动时由它先判定为长按并取消拖动；
+  /// 这里的规则让状态机能脱离界面单独测试。#16 接上菜单时再定以哪边为准。
+  static const longPressTimeout = kLongPressTimeout;
 
   CardDragState _state = const CardDragIdle();
 
   CardDragState get state => _state;
+
+  /// 正在拖动的卡片和它现在的位置；没有在拖动时为 null。
+  CardDrop? get dragged => switch (_state) {
+    CardDragging(:final cardId, :final position) => (
+      cardId: cardId,
+      position: position,
+    ),
+    _ => null,
+  };
 
   /// 指针在 [pointer] 按下，按在左上角位于 [origin] 的卡片上。
   void down(
@@ -114,16 +130,10 @@ class CardDragMachine {
   }
 
   /// 指针抬起。拖动过时返回卡片要移到的位置；不是拖动时返回 null。
-  ({String cardId, Offset position})? up() {
-    final state = _state;
+  CardDrop? up() {
+    final drop = dragged;
     _state = const CardDragIdle();
-    return switch (state) {
-      CardDragging(:final cardId, :final position) => (
-        cardId: cardId,
-        position: position,
-      ),
-      _ => null,
-    };
+    return drop;
   }
 
   /// 手势被别的操作抢走（比如捏合缩放画布）：放弃拖动，卡片回到原处。
