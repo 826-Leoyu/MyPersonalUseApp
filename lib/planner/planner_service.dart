@@ -11,6 +11,7 @@ import 'link.dart';
 import 'link_kind.dart';
 import 'planner_exceptions.dart';
 import 'task_card.dart';
+import 'trashed_card.dart';
 
 /// 界面层使用的业务门面。所有业务规则都在这里，每个写操作是一个事务。
 class PlannerService {
@@ -23,6 +24,9 @@ class PlannerService {
 
   static const maxTitleLength = 200;
   static const maxNoteLength = 5000;
+
+  /// 删除的卡片在回收站里保留多久。
+  static const trashRetention = Duration(days: 10);
 
   final PlannerDatabase _db;
   final Clock _clock;
@@ -160,6 +164,70 @@ class PlannerService {
         ),
       );
     });
+  }
+
+  /// 把卡片移到回收站。连线和历史记录不动。
+  ///
+  /// 已经在回收站里时静默成功，删除时间不变；卡片不存在时抛出 [NotFound]。
+  Future<void> deleteCard(String id) async {
+    await _write(() async {
+      final card = await _requireCard(id);
+      if (card.deletedAt != null) return;
+      await _updateCard(id, TaskCardsCompanion(deletedAt: Value(_nowMillis)));
+    });
+  }
+
+  /// 把卡片从回收站拿出来，回到原来的日期、位置和状态。
+  ///
+  /// 不在回收站里时静默成功（删除的撤销提示和撤销栈可能先后恢复同一张卡片）；
+  /// 卡片不存在时抛出 [NotFound]。
+  // TODO(#12): 未完成卡片的日期早于今天时，按顺延规则立即搬到今天并生成历史记录。
+  Future<void> restoreCard(String id) async {
+    await _write(() async {
+      final card = await _requireCard(id);
+      if (card.deletedAt == null) return;
+      await _updateCard(id, const TaskCardsCompanion(deletedAt: Value(null)));
+    });
+  }
+
+  /// 物理删除回收站里的一张卡片，以及和它相关的所有连线和历史记录。
+  ///
+  /// 卡片不在回收站里时抛出 [InvalidState]；卡片不存在时抛出 [NotFound]。
+  Future<void> deleteForever(String id) async {
+    await _write(() async {
+      final card = await _requireCard(id);
+      if (card.deletedAt == null) {
+        throw const InvalidState('只有回收站里的卡片可以永久删除');
+      }
+      await _purgeCards([id]);
+    });
+  }
+
+  /// 物理删除回收站里的所有卡片，以及和它们相关的所有连线和历史记录。
+  Future<void> emptyTrash() async {
+    await _write(() async {
+      final trashedIds =
+          await (_db.selectOnly(_db.taskCards)
+                ..addColumns([_db.taskCards.id])
+                ..where(_db.taskCards.deletedAt.isNotNull()))
+              .map((row) => row.read(_db.taskCards.id)!)
+              .get();
+      await _purgeCards(trashedIds);
+    });
+  }
+
+  /// 物理删除 [cardIds] 这些卡片，以及和它们相关的所有连线和历史记录。
+  ///
+  /// 先删连线和历史记录，再删卡片（外键约束要求）。回收站测试按这 3 次写入
+  /// 模拟中途失败，改动写入次数或顺序时要同步修改测试。
+  Future<void> _purgeCards(List<String> cardIds) async {
+    await (_db.delete(_db.links)
+          ..where((l) => l.fromCardId.isIn(cardIds) | l.toCardId.isIn(cardIds)))
+        .go();
+    await (_db.delete(
+      _db.carryOverRecords,
+    )..where((r) => r.cardId.isIn(cardIds))).go();
+    await (_db.delete(_db.taskCards)..where((c) => c.id.isIn(cardIds))).go();
   }
 
   /// 在 [draggedId] 和 [targetId] 之间连线或断开。
@@ -313,6 +381,33 @@ class PlannerService {
           ),
       };
     });
+  }
+
+  /// 持续推送回收站里的卡片，按删除时间倒序，每张带剩余天数。
+  ///
+  /// 剩余天数在每次推送时按当时的时钟计算；只有时间流逝、数据没变时不会推送。
+  Stream<List<TrashedCard>> watchTrash() {
+    final query = _db.select(_db.taskCards)
+      ..where((c) => c.deletedAt.isNotNull())
+      // 同一毫秒删除的卡片按 id 排，保证顺序稳定。
+      ..orderBy([
+        (c) => OrderingTerm.desc(c.deletedAt),
+        (c) => OrderingTerm.asc(c.id),
+      ]);
+    return query.watch().map(
+      (rows) => [
+        for (final row in rows)
+          TrashedCard(card: _toCard(row), daysLeft: _daysLeft(row.deletedAt!)),
+      ],
+    );
+  }
+
+  /// [trashRetention] 减去已删除的时间，按天计，不满一天的部分向上取整，最小为 0。
+  int _daysLeft(int deletedAtMillis) {
+    const dayMillis = Duration.millisecondsPerDay;
+    final leftMillis =
+        trashRetention.inMilliseconds - (_nowMillis - deletedAtMillis);
+    return leftMillis <= 0 ? 0 : (leftMillis + dayMillis - 1) ~/ dayMillis;
   }
 
   Future<DayBoard> _loadBoard(DayKey dayKey) async {

@@ -25,7 +25,11 @@ class PlannerHarness {
   DayKey get today => DayKey.fromDateTime(now);
 
   /// 打开后，所有写入都会报错；读取不受影响。
-  set failWrites(bool value) => _failingWrites.enabled = value;
+  set failWrites(bool value) =>
+      _failingWrites.writesBeforeFailure = value ? 0 : null;
+
+  /// 之后的 [count] 次写入成功，再往后的写入都报错，用来模拟事务中途失败。
+  void failWritesAfter(int count) => _failingWrites.writesBeforeFailure = count;
 
   void _open() {
     _database = PlannerDatabase(
@@ -45,17 +49,9 @@ class PlannerHarness {
 
   // ---- 测试夹具 ----
   //
-  // 直接改数据库来准备 PlannerService 还没有公开接口的卡片状态。
+  // 直接改数据库来准备 PlannerService 还没有公开接口的卡片状态和历史记录。
   // 只用来准备数据，检查结果一律通过 service 的公开接口。
-  // TODO(#10, #11, #12): 对应的公开接口完成后，补充走公开接口的端到端测试。
-
-  /// 把卡片放进回收站，相当于 `deleteCard`（#10）。
-  Future<void> markDeleted(String cardId) =>
-      _updateCardRow(cardId, TaskCardsCompanion(deletedAt: Value(_nowMillis)));
-
-  /// 把卡片从回收站拿出来，相当于 `restoreCard`（#10）。
-  Future<void> markRestored(String cardId) =>
-      _updateCardRow(cardId, const TaskCardsCompanion(deletedAt: Value(null)));
+  // TODO(#11, #12): 对应的公开接口完成后，补充走公开接口的端到端测试。
 
   /// 把卡片搬到 [dayKey] 那一天，相当于顺延（#12）。
   Future<void> markMovedToDay(String cardId, DayKey dayKey) => _updateCardRow(
@@ -68,6 +64,30 @@ class PlannerHarness {
     cardId,
     const TaskCardsCompanion(carriedOver: Value(true)),
   );
+
+  /// 给卡片留一条顺延历史记录，相当于顺延（#11）。
+  Future<void> addCarryOverRecord(String cardId) async {
+    final millis = _nowMillis;
+    await _database
+        .into(_database.carryOverRecords)
+        .insert(
+          CarryOverRecordsCompanion.insert(
+            id: 'record-$cardId-$millis',
+            cardId: cardId,
+            fromDayKey: today.addDays(-1).toString(),
+            toDayKey: today.toString(),
+            x: 0,
+            y: 0,
+            width: 180,
+            height: 88,
+            titleSnapshot: '历史',
+            colorArgb: 0xFFFFF3B0,
+            carriedAt: millis,
+            createdAt: millis,
+            updatedAt: millis,
+          ),
+        );
+  }
 
   Future<void> _updateCardRow(String cardId, TaskCardsCompanion changes) async {
     final updated = await (_database.update(
@@ -84,12 +104,16 @@ class PlannerHarness {
   }
 }
 
-/// 只用来模拟存储失败，不用来验证调用次数。
+/// 只用来模拟存储失败，不用来验证调用次数；计数只用来决定从第几次写入开始失败。
 class _FailingWrites extends QueryInterceptor {
-  bool enabled = false;
+  /// 还允许成功的写入次数；为 null 时不模拟失败。
+  int? writesBeforeFailure;
 
-  void _throwIfEnabled() {
-    if (enabled) throw Exception('模拟的写入失败');
+  void _countWriteOrThrow() {
+    final remaining = writesBeforeFailure;
+    if (remaining == null) return;
+    if (remaining == 0) throw Exception('模拟的写入失败');
+    writesBeforeFailure = remaining - 1;
   }
 
   @override
@@ -98,7 +122,7 @@ class _FailingWrites extends QueryInterceptor {
     String statement,
     List<Object?> args,
   ) {
-    _throwIfEnabled();
+    _countWriteOrThrow();
     return super.runInsert(executor, statement, args);
   }
 
@@ -108,7 +132,7 @@ class _FailingWrites extends QueryInterceptor {
     String statement,
     List<Object?> args,
   ) {
-    _throwIfEnabled();
+    _countWriteOrThrow();
     return super.runUpdate(executor, statement, args);
   }
 
@@ -118,7 +142,7 @@ class _FailingWrites extends QueryInterceptor {
     String statement,
     List<Object?> args,
   ) {
-    _throwIfEnabled();
+    _countWriteOrThrow();
     return super.runDelete(executor, statement, args);
   }
 }
