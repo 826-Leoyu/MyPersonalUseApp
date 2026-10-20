@@ -390,16 +390,11 @@ void main() {
 
   group('取消完成（过去日期）', () {
     /// 在今天建一张卡片并完成，再把时钟拨到 [days] 天后并维护。
-    Future<TaskCard> completedDaysAgo(
-      int days, {
-      String title = '卡片',
-      double x = 300,
-      double y = 200,
-    }) async {
+    Future<TaskCard> completedDaysAgo(int days, {String title = '卡片'}) async {
       final card = await harness.service.createCard(
         harness.today,
-        x: x,
-        y: y,
+        x: 300,
+        y: 200,
         title: title,
       );
       await harness.service.completeCard(card.id);
@@ -479,6 +474,27 @@ void main() {
       // 回到维护日期再维护，不会再顺延。
       harness.now = harness.now.add(const Duration(days: 1));
       expect((await harness.service.runDailyMaintenance()).carriedCount, 0);
+    });
+
+    test('时钟回拨时，日期正好是上次维护日期的卡片取消完成后留在原位', () async {
+      await completedDaysAgo(2); // 维护日期 10-22
+      final maintenanceDay = harness.today;
+      final card = await harness.service.createCard(
+        maintenanceDay,
+        x: 120,
+        y: 80,
+        title: '10-22',
+      );
+      await harness.service.completeCard(card.id);
+      harness.now = harness.now.subtract(const Duration(days: 1)); // 时钟 10-21
+
+      await harness.service.uncompleteCard(card.id);
+
+      final board = await harness.service.watchDay(maintenanceDay).first;
+      final restored = board.cards.singleWhere((c) => c.id == card.id);
+      expect((restored.x, restored.y), (120.0, 80.0));
+      expect(restored.carriedOver, isFalse);
+      expect(board.carryOverRecords, isEmpty);
     });
 
     test('顺延后再完成、取消完成不再顺延，仍然带顺延标记，只有一条记录', () async {

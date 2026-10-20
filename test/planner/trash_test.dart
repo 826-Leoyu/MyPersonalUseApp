@@ -426,6 +426,7 @@ void main() {
     // 只有清理、没有顺延时，依次删除连线、历史记录、卡片，共 3 次写入；
     // 之后还要写维护日期（第 4 次）。在每一步失败都应该整体回滚。
     // 卡片放在未来的日期上，恢复时不会触发顺延。
+    // 改动 PlannerService._purgeCards 的写入次数或顺序时要同步修改这里。
     for (final step in [1, 2, 3, 4]) {
       test('第 $step 步写入失败时整体回滚，过期卡片和连线都还在', () async {
         final future = harness.today.addDays(30);
@@ -462,6 +463,32 @@ void main() {
         expect(board.links.single.id, link.linkId);
       });
     }
+
+    test('同样的场景允许 4 次写入时清理成功，上面的步骤覆盖了每一次写入', () async {
+      final future = harness.today.addDays(30);
+      final a = await harness.service.createCard(
+        future,
+        x: 0,
+        y: 0,
+        title: 'A',
+      );
+      final b = await harness.service.createCard(
+        future,
+        x: 0,
+        y: 0,
+        title: 'B',
+      );
+      await harness.service.toggleLink(a.id, b.id);
+      await harness.addCarryOverRecord(b.id);
+      await harness.service.deleteCard(a.id);
+      await harness.service.deleteCard(b.id);
+      harness.now = harness.now.add(const Duration(days: 11));
+      harness.failWritesAfter(4);
+
+      final summary = await harness.service.runDailyMaintenance();
+
+      expect(summary.cleanedCount, 2);
+    });
   });
 
   group('删除和恢复不改变卡片的其他状态', () {

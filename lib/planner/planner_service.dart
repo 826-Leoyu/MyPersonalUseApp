@@ -193,7 +193,7 @@ class PlannerService {
       final card = await _requireCard(id);
       if (card.deletedAt == null) return;
       await _updateCard(id, const TaskCardsCompanion(deletedAt: Value(null)));
-      if (card.status == CardStatus.active) await _carryOverIfPast(id);
+      await _carryOverIfPast(id);
     });
   }
 
@@ -396,14 +396,17 @@ class PlannerService {
     return entry == null ? null : DayKey.parse(entry.value);
   }
 
-  /// 卡片 [id] 的日期早于有效的今天（见 [_effectiveToday]）时，把它单独顺延到
-  /// 有效的今天。取消完成和恢复卡片在改完状态后调用，要在调用方的事务里执行。
+  /// 卡片 [id] 未完成、日期早于有效的今天（见 [_effectiveToday]）时，把它
+  /// 单独顺延到有效的今天。取消完成和恢复卡片在改完状态后调用，
+  /// 要在调用方的事务里执行。
   Future<void> _carryOverIfPast(String id) async {
     final today = await _effectiveToday();
     final row = await (_db.select(
       _db.taskCards,
     )..where((c) => c.id.equals(id))).getSingle();
-    if (DayKey.parse(row.dayKey) < today) await _carryOver([row], today);
+    if (row.status == CardStatus.active && DayKey.parse(row.dayKey) < today) {
+      await _carryOver([row], today);
+    }
   }
 
   /// 用户操作触发立即顺延时的"今天"：时钟的今天和上次维护日期中较晚的一个。
