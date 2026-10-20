@@ -12,6 +12,8 @@ import 'package:my_personal_use_app/planner/planner_service.dart';
 import 'package:my_personal_use_app/storage/planner_database.dart';
 import 'package:sqlite3/sqlite3.dart';
 
+import '../support/failing_writes.dart';
+
 /// 切入点 2 的测试环境：真实的 [PlannerApp] + 真实的 [PlannerService] +
 /// 内存 SQLite + 假时钟。
 ///
@@ -24,6 +26,7 @@ class BoardHarness {
   }
 
   final Database _sqlite;
+  final _failingWrites = FailingWrites();
 
   /// 假时钟的当前时间（本地时间）。
   DateTime now = DateTime(2026, 10, 20, 9);
@@ -36,12 +39,18 @@ class BoardHarness {
   /// 接下来这么多次打开存储都会报错，用来模拟数据库打不开。
   int failingOpens = 0;
 
+  /// 打开后，App 的所有写入都会报错；读取不受影响。
+  set failWrites(bool value) =>
+      _failingWrites.writesBeforeFailure = value ? 0 : null;
+
   Clock get _clock => Clock(() => now);
 
   /// 在共用的内存数据库上新建一个连接。
-  PlannerDatabase _newConnection() => PlannerDatabase(
-    NativeDatabase.opened(_sqlite, closeUnderlyingOnClose: false),
-  );
+  QueryExecutor _connect() =>
+      NativeDatabase.opened(_sqlite, closeUnderlyingOnClose: false);
+
+  /// 给 seed 和 readBoard 用的连接，写入不会被模拟成失败。
+  PlannerDatabase _newConnection() => PlannerDatabase(_connect());
 
   /// 注入给 App 的数据库工厂。
   PlannerDatabase _openDatabase() {
@@ -49,7 +58,7 @@ class BoardHarness {
       failingOpens--;
       return PlannerDatabase(LazyDatabase(() => throw Exception('模拟的数据库打不开')));
     }
-    return _newConnection();
+    return PlannerDatabase(_connect().interceptWith(_failingWrites));
   }
 
   /// 在启动 App 之前准备数据。
