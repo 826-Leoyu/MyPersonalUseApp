@@ -30,6 +30,9 @@ class BoardHarness {
 
   DayKey get today => DayKey.fromDateTime(now);
 
+  /// 画布显示哪一天；为 null 时显示今天。日期栏做好之前，用它来测过去的日期。
+  DayKey? displayedDay;
+
   /// 接下来这么多次打开存储都会报错，用来模拟数据库打不开。
   int failingOpens = 0;
 
@@ -76,6 +79,8 @@ class BoardHarness {
         overrides: [
           clockProvider.overrideWithValue(_clock),
           plannerDatabaseFactoryProvider.overrideWithValue(_openDatabase),
+          if (displayedDay case final day?)
+            displayedDayProvider.overrideWithValue(day),
         ],
         child: const PlannerApp(),
       ),
