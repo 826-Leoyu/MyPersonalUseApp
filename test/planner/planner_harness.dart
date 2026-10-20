@@ -47,15 +47,7 @@ class PlannerHarness {
   //
   // 直接改数据库来准备 PlannerService 还没有公开接口的卡片状态。
   // 只用来准备数据，检查结果一律通过 service 的公开接口。
-  // TODO(#10, #11, #12): 对应的公开接口完成后，补充走公开接口的端到端测试。
-
-  /// 把卡片放进回收站，相当于 `deleteCard`（#10）。
-  Future<void> markDeleted(String cardId) =>
-      _updateCardRow(cardId, TaskCardsCompanion(deletedAt: Value(_nowMillis)));
-
-  /// 把卡片从回收站拿出来，相当于 `restoreCard`（#10）。
-  Future<void> markRestored(String cardId) =>
-      _updateCardRow(cardId, const TaskCardsCompanion(deletedAt: Value(null)));
+  // TODO(#11, #12): 对应的公开接口完成后，补充走公开接口的端到端测试。
 
   /// 把卡片搬到 [dayKey] 那一天，相当于顺延（#12）。
   Future<void> markMovedToDay(String cardId, DayKey dayKey) => _updateCardRow(
@@ -68,6 +60,30 @@ class PlannerHarness {
     cardId,
     const TaskCardsCompanion(carriedOver: Value(true)),
   );
+
+  /// 给卡片留一条顺延历史记录，相当于顺延（#11）。
+  Future<void> addCarryOverRecord(String cardId) async {
+    final millis = _nowMillis;
+    await _database
+        .into(_database.carryOverRecords)
+        .insert(
+          CarryOverRecordsCompanion.insert(
+            id: 'record-$cardId-$millis',
+            cardId: cardId,
+            fromDayKey: today.addDays(-1).toString(),
+            toDayKey: today.toString(),
+            x: 0,
+            y: 0,
+            width: 180,
+            height: 88,
+            titleSnapshot: '历史',
+            colorArgb: 0xFFFFF3B0,
+            carriedAt: millis,
+            createdAt: millis,
+            updatedAt: millis,
+          ),
+        );
+  }
 
   Future<void> _updateCardRow(String cardId, TaskCardsCompanion changes) async {
     final updated = await (_database.update(

@@ -58,14 +58,14 @@ void main() {
 
     test('在回收站里的卡片不能完成', () async {
       final card = await newCard();
-      await harness.markDeleted(card.id);
+      await harness.service.deleteCard(card.id);
 
       await expectLater(
         harness.service.completeCard(card.id),
         throwsA(isA<InvalidState>()),
       );
 
-      await harness.markRestored(card.id);
+      await harness.service.restoreCard(card.id);
       final board = await harness.service.watchDay(harness.today).first;
       expect(board.cards.single.status, CardStatus.active);
     });
@@ -103,7 +103,7 @@ void main() {
       for (final card in [kept, trashed, tomorrow]) {
         await harness.service.completeCard(card.id);
       }
-      await harness.markDeleted(trashed.id);
+      await harness.service.deleteCard(trashed.id);
 
       final completed = await harness.service
           .watchCompleted(harness.today)
@@ -145,7 +145,7 @@ void main() {
       for (final card in [...cards.take(3), tomorrow]) {
         await service.completeCard(card.id);
       }
-      await harness.markDeleted(cards[2].id);
+      await harness.service.deleteCard(cards[2].id);
 
       final board = await service.watchDay(harness.today).first;
       expect(board.completedCount, 2);
@@ -194,8 +194,8 @@ void main() {
       await cardOn(today.addDays(3), '范围外');
       await service.completeCard(done.id);
       await service.completeCard(trashedDone.id);
-      await harness.markDeleted(trashedActive.id);
-      await harness.markDeleted(trashedDone.id);
+      await harness.service.deleteCard(trashedActive.id);
+      await harness.service.deleteCard(trashedDone.id);
 
       final counts = await watchCounts(today, today.addDays(2)).first;
 
@@ -348,14 +348,14 @@ void main() {
     test('在回收站里的已完成卡片不能取消完成', () async {
       final card = await newCard();
       await harness.service.completeCard(card.id);
-      await harness.markDeleted(card.id);
+      await harness.service.deleteCard(card.id);
 
       await expectLater(
         harness.service.uncompleteCard(card.id),
         throwsA(isA<InvalidState>()),
       );
 
-      await harness.markRestored(card.id);
+      await harness.service.restoreCard(card.id);
       final completed = await harness.service
           .watchCompleted(harness.today)
           .first;

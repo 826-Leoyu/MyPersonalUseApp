@@ -137,7 +137,7 @@ void main() {
     /// 让一张卡片变成不能连线的状态，按名字列出，每个都单独生成测试。
     final unavailable = <String, Future<void> Function(String id)>{
       '已完成': (id) => harness.service.completeCard(id),
-      '在回收站里': (id) => harness.markDeleted(id),
+      '在回收站里': (id) => harness.service.deleteCard(id),
     };
 
     for (final MapEntry(key: state, value: makeUnavailable)
@@ -209,10 +209,10 @@ void main() {
       final b = await newCard('B');
       await harness.service.toggleLink(a.id, b.id);
 
-      await harness.markDeleted(a.id);
+      await harness.service.deleteCard(a.id);
       expect(await linksOnBoard(), isEmpty);
 
-      await harness.markRestored(a.id);
+      await harness.service.restoreCard(a.id);
       expect((await linksOnBoard()).single.fromCardId, a.id);
     });
 
@@ -395,8 +395,8 @@ void main() {
             (id) => harness.service.uncompleteCard(id),
           ),
           '在回收站里': (
-            (id) => harness.markDeleted(id),
-            (id) => harness.markRestored(id),
+            (id) => harness.service.deleteCard(id),
+            (id) => harness.service.restoreCard(id),
           ),
           '搬到了另一天': (
             (id) => harness.markMovedToDay(id, harness.today.addDays(1)),
