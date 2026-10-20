@@ -102,6 +102,22 @@ void main() {
       await harness.dispose(tester);
     });
 
+    testWidgets('点正在新建的卡片上输入框以外的地方，仍然在编辑，不算点空白处', (tester) async {
+      await harness.launch(tester);
+      await doubleTapAt(tester, blankSpot);
+
+      // 卡片中心在双击的位置，左上角的内边距里没有输入框。
+      const corner = Offset(
+        TaskCard.defaultWidth / 2 - 4,
+        TaskCard.defaultHeight / 2 - 4,
+      );
+      await tapAt(tester, blankSpot - corner);
+
+      expect(titleField(), findsOneWidget);
+
+      await harness.dispose(tester);
+    });
+
     testWidgets('新建时填了备注，标题和备注一起保存', (tester) async {
       await harness.launch(tester);
 

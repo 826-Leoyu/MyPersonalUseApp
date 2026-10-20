@@ -105,14 +105,14 @@ class BoardSelectionController extends Notifier<BoardSelection> {
     final editing = state;
     if (editing is! Editing) return;
     final title = editing.title.trim();
+    // 标题为空：新卡片丢弃，已有的卡片保留原来的内容。
+    if (title.isEmpty) return;
     final note = editing.note.trim().isEmpty ? null : editing.note;
     final service = await ref.read(plannerServiceProvider.future);
     switch (editing) {
       case EditingCard(:final cardId):
-        if (title.isEmpty) return;
         await service.updateCardContent(cardId, title: title, note: note);
       case EditingNewCard(:final x, :final y):
-        if (title.isEmpty) return;
         final card = await service.createCard(
           ref.read(displayedDayProvider),
           x: x,

@@ -163,15 +163,13 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
                   _CardView(
                     key: ValueKey(card.id),
                     card: card,
-                    selected: switch (selection) {
-                      CardSelected(:final cardId) => cardId == card.id,
-                      _ => false,
-                    },
-                    editing: switch (selection) {
-                      EditingCard(:final cardId) when cardId == card.id =>
-                        selection,
-                      _ => null,
-                    },
+                    selected:
+                        selection is CardSelected &&
+                        selection.cardId == card.id,
+                    editing:
+                        selection is EditingCard && selection.cardId == card.id
+                        ? selection
+                        : null,
                     onTap: () => _save(() => _selection.tapCard(card)),
                     globalToCanvas: _globalToCanvas,
                     onResize: (size) => _resizeCard(card, size),
@@ -182,9 +180,15 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
                     top: draft.y,
                     width: TaskCard.defaultWidth,
                     height: TaskCard.defaultHeight,
-                    child: _CardFrame(
-                      colorArgb: TaskCard.defaultColorArgb,
-                      child: _CardEditor(editing: draft),
+                    // 点在新卡片上（包括输入框以外的地方）不算点空白处。
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {},
+                      onDoubleTap: () {},
+                      child: _CardFrame(
+                        colorArgb: TaskCard.defaultColorArgb,
+                        child: _CardEditor(editing: draft),
+                      ),
                     ),
                   ),
               ],
