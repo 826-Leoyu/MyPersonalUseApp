@@ -145,8 +145,8 @@ void main() {
       final ab = await harness.service.toggleLink(a.id, b.id);
       final bc = await harness.service.toggleLink(b.id, c.id);
       final ac = await harness.service.toggleLink(a.id, c.id);
-      // 历史记录还没有公开的读取接口（#11）；卡片表有外键约束，
-      // 历史记录没删掉时卡片也删不掉。
+      // 用夹具直接留一条历史记录（走真实顺延的版本见 carry_over_test.dart）；
+      // 卡片表有外键约束，历史记录没删掉时卡片也删不掉。
       await harness.addCarryOverRecord(b.id);
       await harness.service.deleteCard(b.id);
 

@@ -51,7 +51,8 @@ class PlannerHarness {
   //
   // 直接改数据库来准备 PlannerService 还没有公开接口的卡片状态和历史记录。
   // 只用来准备数据，检查结果一律通过 service 的公开接口。
-  // TODO(#11, #12): 对应的公开接口完成后，补充走公开接口的端到端测试。
+  // 走真实顺延（#11）的端到端测试见 carry_over_test.dart。
+  // TODO(#12): 对应的公开接口完成后，补充走公开接口的端到端测试。
 
   /// 把卡片搬到 [dayKey] 那一天，相当于顺延（#12）。
   Future<void> markMovedToDay(String cardId, DayKey dayKey) => _updateCardRow(
