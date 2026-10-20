@@ -49,24 +49,24 @@ class PlannerHarness {
 
   // ---- 测试夹具 ----
   //
-  // 直接改数据库来准备 PlannerService 还没有公开接口的卡片状态和历史记录。
-  // 只用来准备数据，检查结果一律通过 service 的公开接口。
-  // 走真实顺延（#11）的端到端测试见 carry_over_test.dart。
-  // TODO(#12): 对应的公开接口完成后，补充走公开接口的端到端测试。
+  // 直接改数据库，快速准备卡片状态和历史记录（比如把卡片放到公开接口
+  // 做不到的日期上）。只用来准备数据，检查结果一律通过 service 的公开接口。
+  // 走真实顺延的端到端测试见 carry_over_test.dart（每日维护）、
+  // completion_test.dart 和 trash_test.dart（取消完成、恢复时的立即顺延）。
 
-  /// 把卡片搬到 [dayKey] 那一天，相当于顺延（#12）。
+  /// 把卡片搬到 [dayKey] 那一天，相当于顺延。
   Future<void> markMovedToDay(String cardId, DayKey dayKey) => _updateCardRow(
     cardId,
     TaskCardsCompanion(dayKey: Value(dayKey.toString())),
   );
 
-  /// 把卡片标成顺延过，相当于顺延（#11）。
+  /// 把卡片标成顺延过，相当于顺延。
   Future<void> markCarriedOver(String cardId) => _updateCardRow(
     cardId,
     const TaskCardsCompanion(carriedOver: Value(true)),
   );
 
-  /// 给卡片留一条顺延历史记录，相当于顺延（#11）。
+  /// 给卡片留一条顺延历史记录，相当于顺延。
   Future<void> addCarryOverRecord(String cardId) async {
     final millis = _nowMillis;
     await _database

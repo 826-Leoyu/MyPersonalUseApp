@@ -387,4 +387,226 @@ void main() {
       expect(board.cards, isEmpty);
     });
   });
+
+  group('取消完成（过去日期）', () {
+    /// 在今天建一张卡片并完成，再把时钟拨到 [days] 天后并维护。
+    Future<TaskCard> completedDaysAgo(int days, {String title = '卡片'}) async {
+      final card = await harness.service.createCard(
+        harness.today,
+        x: 300,
+        y: 200,
+        title: title,
+      );
+      await harness.service.completeCard(card.id);
+      harness.now = harness.now.add(Duration(days: days));
+      await harness.service.runDailyMaintenance();
+      return card;
+    }
+
+    test('取消完成后卡片立即顺延到今天左上角，原日期留下历史记录', () async {
+      final card = await completedDaysAgo(1);
+      final yesterday = card.dayKey;
+
+      await harness.service.uncompleteCard(card.id);
+
+      final today = await harness.service.watchDay(harness.today).first;
+      final moved = today.cards.single;
+      expect(moved.id, card.id);
+      expect((moved.x, moved.y), (24.0, 24.0));
+      expect(moved.status, CardStatus.active);
+      expect(moved.carriedOver, isTrue);
+      final past = await harness.service.watchDay(yesterday).first;
+      expect(past.cards, isEmpty);
+      final record = past.carryOverRecords.single;
+      expect(record.cardId, card.id);
+      expect((record.x, record.y), (300.0, 200.0));
+      expect(record.toDayKey, harness.today);
+      expect(await harness.service.watchCompleted(yesterday).first, isEmpty);
+    });
+
+    test('今天已有的卡片右移，给顺延卡片腾出左上角', () async {
+      final card = await completedDaysAgo(1);
+      final existing = await harness.service.createCard(
+        harness.today,
+        x: 100,
+        y: 100,
+        title: '今天',
+      );
+
+      await harness.service.uncompleteCard(card.id);
+
+      final board = await harness.service.watchDay(harness.today).first;
+      // 顺延区宽 W = 180：dx = max(180 + 48, 24 + 180 + 48 - 100) = 228。
+      expect(
+        board.cards.map((c) => (c.id, c.x)),
+        unorderedEquals([(card.id, 24.0), (existing.id, 328.0)]),
+      );
+    });
+
+    test('没有维护过时按时钟的今天顺延', () async {
+      final card = await newCard();
+      await harness.service.completeCard(card.id);
+      harness.now = harness.now.add(const Duration(days: 2));
+
+      await harness.service.uncompleteCard(card.id);
+
+      expect((await harness.service.findCard(card.id)).dayKey, harness.today);
+    });
+
+    test('时钟回拨时顺延到上次维护的日期，而不是时钟的今天', () async {
+      final early = await completedDaysAgo(2, title: '10-20'); // 维护日期 10-22
+      harness.now = harness.now.subtract(const Duration(days: 1)); // 时钟 10-21
+      final maintenanceDay = harness.today.addDays(1);
+      // 在 10-21（时钟的今天）上建一张卡片并完成：它也早于维护日期。
+      final onClockToday = await newCard('10-21');
+      await harness.service.completeCard(onClockToday.id);
+
+      await harness.service.uncompleteCard(early.id);
+      await harness.service.uncompleteCard(onClockToday.id);
+
+      for (final card in [early, onClockToday]) {
+        expect(
+          (await harness.service.findCard(card.id)).dayKey,
+          maintenanceDay,
+          reason: card.title,
+        );
+      }
+      // 回到维护日期再维护，不会再顺延。
+      harness.now = harness.now.add(const Duration(days: 1));
+      expect((await harness.service.runDailyMaintenance()).carriedCount, 0);
+    });
+
+    test('时钟回拨时，日期正好是上次维护日期的卡片取消完成后留在原位', () async {
+      await completedDaysAgo(2); // 维护日期 10-22
+      final maintenanceDay = harness.today;
+      final card = await harness.service.createCard(
+        maintenanceDay,
+        x: 120,
+        y: 80,
+        title: '10-22',
+      );
+      await harness.service.completeCard(card.id);
+      harness.now = harness.now.subtract(const Duration(days: 1)); // 时钟 10-21
+
+      await harness.service.uncompleteCard(card.id);
+
+      final board = await harness.service.watchDay(maintenanceDay).first;
+      final restored = board.cards.singleWhere((c) => c.id == card.id);
+      expect((restored.x, restored.y), (120.0, 80.0));
+      expect(restored.carriedOver, isFalse);
+      expect(board.carryOverRecords, isEmpty);
+    });
+
+    test('时钟恢复后，回拨时取消完成的卡片按正常规则继续顺延，只有一张有效卡片', () async {
+      final card = await completedDaysAgo(2); // 卡片 10-20，维护日期 10-22
+      final maintenanceDay = harness.today;
+      harness.now = harness.now.subtract(const Duration(days: 1)); // 时钟 10-21
+      await harness.service.uncompleteCard(card.id);
+
+      // 时钟回到维护日期：同一天不再顺延，卡片留在 10-22。
+      harness.now = harness.now.add(const Duration(days: 1));
+      expect((await harness.service.runDailyMaintenance()).carriedCount, 0);
+      expect((await harness.service.findCard(card.id)).dayKey, maintenanceDay);
+      // 到了下一天，按每日维护正常顺延，在 10-22 再留一条记录。
+      harness.now = harness.now.add(const Duration(days: 1));
+      expect((await harness.service.runDailyMaintenance()).carriedCount, 1);
+
+      final ids = <String>[];
+      final recordDays = <DayKey>[];
+      for (var day = card.dayKey; day <= harness.today; day = day.addDays(1)) {
+        final board = await harness.service.watchDay(day).first;
+        ids.addAll(board.cards.map((c) => c.id));
+        if (board.carryOverRecords.isNotEmpty) recordDays.add(day);
+      }
+      expect(ids, [card.id]);
+      expect((await harness.service.findCard(card.id)).dayKey, harness.today);
+      expect(recordDays, [card.dayKey, maintenanceDay]);
+    });
+
+    test('顺延后再完成、取消完成不再顺延，仍然带顺延标记，只有一条记录', () async {
+      final card = await completedDaysAgo(1);
+      final yesterday = card.dayKey;
+      await harness.service.uncompleteCard(card.id);
+
+      await harness.service.completeCard(card.id);
+      final completed = await harness.service
+          .watchCompleted(harness.today)
+          .first;
+      expect(completed.single.carriedOver, isTrue);
+      await harness.service.uncompleteCard(card.id);
+
+      final today = await harness.service.watchDay(harness.today).first;
+      expect(today.cards.single.id, card.id);
+      expect(today.cards.single.carriedOver, isTrue);
+      expect(today.carryOverRecords, isEmpty);
+      final past = await harness.service.watchDay(yesterday).first;
+      expect(past.carryOverRecords, hasLength(1));
+    });
+
+    test('顺延不复制卡片：之后几天的维护里卡片只有一张，没完成时继续顺延', () async {
+      final card = await completedDaysAgo(3);
+      final start = card.dayKey;
+      await harness.service.uncompleteCard(card.id);
+      harness.now = harness.now.add(const Duration(days: 1));
+
+      expect((await harness.service.runDailyMaintenance()).carriedCount, 1);
+
+      final ids = <String>[];
+      for (var day = start; day <= harness.today; day = day.addDays(1)) {
+        final board = await harness.service.watchDay(day).first;
+        ids.addAll(board.cards.map((c) => c.id));
+      }
+      expect(ids, [card.id]);
+      expect((await harness.service.findCard(card.id)).dayKey, harness.today);
+    });
+
+    // 今天已有一张卡片时，依次写入：卡片状态、右移今天的卡片、历史记录、
+    // 卡片新位置，共 4 次写入。在每一步失败都应该整体回滚。
+    // 改动 PlannerService._carryOver 的写入次数或顺序时要同步修改这里。
+    for (final step in [1, 2, 3, 4]) {
+      test('第 $step 步写入失败时整体回滚，卡片仍在原日期的已完成列表里', () async {
+        final card = await completedDaysAgo(1);
+        final yesterday = card.dayKey;
+        final existing = await harness.service.createCard(
+          harness.today,
+          x: 100,
+          y: 100,
+          title: '今天',
+        );
+        harness.failWritesAfter(step - 1);
+
+        await expectLater(
+          harness.service.uncompleteCard(card.id),
+          throwsA(isA<StorageFailure>()),
+        );
+
+        harness.failWrites = false;
+        final completed = await harness.service.watchCompleted(yesterday).first;
+        expect(completed.single.id, card.id);
+        expect(completed.single.carriedOver, isFalse);
+        final past = await harness.service.watchDay(yesterday).first;
+        expect(past.carryOverRecords, isEmpty);
+        final board = await harness.service.watchDay(harness.today).first;
+        expect(board.cards.map((c) => (c.id, c.x)), [(existing.id, 100.0)]);
+        // 回滚后可以重新取消完成。
+        await harness.service.uncompleteCard(card.id);
+        expect((await harness.service.findCard(card.id)).dayKey, harness.today);
+      });
+    }
+
+    test('同样的场景允许 4 次写入时取消完成成功，上面的步骤覆盖了每一次写入', () async {
+      final card = await completedDaysAgo(1);
+      await harness.service.createCard(
+        harness.today,
+        x: 100,
+        y: 100,
+        title: '今天',
+      );
+      harness.failWritesAfter(4);
+
+      await harness.service.uncompleteCard(card.id);
+
+      expect((await harness.service.findCard(card.id)).dayKey, harness.today);
+    });
+  });
 }
