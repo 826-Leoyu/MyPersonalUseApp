@@ -411,8 +411,9 @@ class PlannerService {
 
   /// 用户操作触发立即顺延时的"今天"：时钟的今天和上次维护日期中较晚的一个。
   ///
-  /// 系统时钟被调回过去时，维护日期以前的卡片已经顺延过，按时钟的今天顺延
-  /// 会把卡片搬到比维护日期还早的日子，下次维护时又被搬走。
+  /// 系统时钟被调回过去时，按时钟的今天顺延会把卡片搬到比维护日期还早的
+  /// 日子；时钟恢复到维护日期那天不再维护，卡片就留在了过去。见 spec
+  /// 「系统时钟回拨时的例外」。
   Future<DayKey> _effectiveToday() async {
     final today = _today;
     final lastDay = await _lastMaintenanceDay();

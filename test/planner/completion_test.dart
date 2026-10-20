@@ -497,6 +497,32 @@ void main() {
       expect(board.carryOverRecords, isEmpty);
     });
 
+    test('时钟恢复后，回拨时取消完成的卡片按正常规则继续顺延，只有一张有效卡片', () async {
+      final card = await completedDaysAgo(2); // 卡片 10-20，维护日期 10-22
+      final maintenanceDay = harness.today;
+      harness.now = harness.now.subtract(const Duration(days: 1)); // 时钟 10-21
+      await harness.service.uncompleteCard(card.id);
+
+      // 时钟回到维护日期：同一天不再顺延，卡片留在 10-22。
+      harness.now = harness.now.add(const Duration(days: 1));
+      expect((await harness.service.runDailyMaintenance()).carriedCount, 0);
+      expect((await harness.service.findCard(card.id)).dayKey, maintenanceDay);
+      // 到了下一天，按每日维护正常顺延，在 10-22 再留一条记录。
+      harness.now = harness.now.add(const Duration(days: 1));
+      expect((await harness.service.runDailyMaintenance()).carriedCount, 1);
+
+      final ids = <String>[];
+      final recordDays = <DayKey>[];
+      for (var day = card.dayKey; day <= harness.today; day = day.addDays(1)) {
+        final board = await harness.service.watchDay(day).first;
+        ids.addAll(board.cards.map((c) => c.id));
+        if (board.carryOverRecords.isNotEmpty) recordDays.add(day);
+      }
+      expect(ids, [card.id]);
+      expect((await harness.service.findCard(card.id)).dayKey, harness.today);
+      expect(recordDays, [card.dayKey, maintenanceDay]);
+    });
+
     test('顺延后再完成、取消完成不再顺延，仍然带顺延标记，只有一条记录', () async {
       final card = await completedDaysAgo(1);
       final yesterday = card.dayKey;

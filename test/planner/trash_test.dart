@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:my_personal_use_app/planner/day_key.dart';
 import 'package:my_personal_use_app/planner/planner_exceptions.dart';
 import 'package:my_personal_use_app/planner/task_card.dart';
 
@@ -191,6 +192,68 @@ void main() {
       await harness.service.restoreCard(card.id);
 
       expect((await harness.service.findCard(card.id)).dayKey, maintenanceDay);
+    });
+
+    test('时钟回拨时，日期在时钟的今天和维护日期之间的卡片恢复后也顺延到维护日期', () async {
+      await trashedDaysAgo(2); // 维护日期 10-22
+      final maintenanceDay = harness.today;
+      harness.now = harness.now.subtract(const Duration(days: 1)); // 时钟 10-21
+      final card = await newCard('10-21');
+      await harness.service.deleteCard(card.id);
+
+      await harness.service.restoreCard(card.id);
+
+      expect((await harness.service.findCard(card.id)).dayKey, maintenanceDay);
+      final past = await harness.service.watchDay(card.dayKey).first;
+      expect(past.carryOverRecords.single.cardId, card.id);
+    });
+
+    test('时钟回拨时，日期正好是维护日期的卡片恢复后留在原位', () async {
+      await trashedDaysAgo(2); // 维护日期 10-22
+      final maintenanceDay = harness.today;
+      final card = await harness.service.createCard(
+        maintenanceDay,
+        x: 120,
+        y: 80,
+        title: '10-22',
+      );
+      await harness.service.deleteCard(card.id);
+      harness.now = harness.now.subtract(const Duration(days: 1)); // 时钟 10-21
+
+      await harness.service.restoreCard(card.id);
+
+      final board = await harness.service.watchDay(maintenanceDay).first;
+      final restored = board.cards.single;
+      expect(restored.id, card.id);
+      expect((restored.x, restored.y), (120.0, 80.0));
+      expect(restored.carriedOver, isFalse);
+      expect(board.carryOverRecords, isEmpty);
+    });
+
+    test('时钟恢复后，回拨时恢复的卡片按正常规则继续顺延，只有一张有效卡片', () async {
+      final card = await trashedDaysAgo(2); // 卡片 10-20，维护日期 10-22
+      final maintenanceDay = harness.today;
+      harness.now = harness.now.subtract(const Duration(days: 1)); // 时钟 10-21
+      await harness.service.restoreCard(card.id);
+
+      // 时钟回到维护日期：同一天不再顺延，卡片留在 10-22。
+      harness.now = harness.now.add(const Duration(days: 1));
+      expect((await harness.service.runDailyMaintenance()).carriedCount, 0);
+      expect((await harness.service.findCard(card.id)).dayKey, maintenanceDay);
+      // 到了下一天，按每日维护正常顺延，在 10-22 再留一条记录。
+      harness.now = harness.now.add(const Duration(days: 1));
+      expect((await harness.service.runDailyMaintenance()).carriedCount, 1);
+
+      final ids = <String>[];
+      final recordDays = <DayKey>[];
+      for (var day = card.dayKey; day <= harness.today; day = day.addDays(1)) {
+        final board = await harness.service.watchDay(day).first;
+        ids.addAll(board.cards.map((c) => c.id));
+        if (board.carryOverRecords.isNotEmpty) recordDays.add(day);
+      }
+      expect(ids, [card.id]);
+      expect((await harness.service.findCard(card.id)).dayKey, harness.today);
+      expect(recordDays, [card.dayKey, maintenanceDay]);
     });
 
     test('同一张卡片先后恢复两次，只顺延一次', () async {
