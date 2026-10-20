@@ -6,6 +6,8 @@ import 'package:my_personal_use_app/planner/planner_service.dart';
 import 'package:my_personal_use_app/storage/planner_database.dart';
 import 'package:sqlite3/sqlite3.dart';
 
+import '../support/failing_writes.dart';
+
 /// 切入点 1 的测试环境：真实的 [PlannerService] + 内存 SQLite + 假时钟。
 ///
 /// 底层的内存数据库在 [reopen] 之后仍然保留，用来模拟"重启 App"。
@@ -15,7 +17,7 @@ class PlannerHarness {
   }
 
   final Database _sqlite;
-  final _failingWrites = _FailingWrites();
+  final _failingWrites = FailingWrites();
   late PlannerDatabase _database;
   late PlannerService service;
 
@@ -102,48 +104,5 @@ class PlannerHarness {
   Future<void> dispose() async {
     await _database.close();
     _sqlite.close();
-  }
-}
-
-/// 只用来模拟存储失败，不用来验证调用次数；计数只用来决定从第几次写入开始失败。
-class _FailingWrites extends QueryInterceptor {
-  /// 还允许成功的写入次数；为 null 时不模拟失败。
-  int? writesBeforeFailure;
-
-  void _countWriteOrThrow() {
-    final remaining = writesBeforeFailure;
-    if (remaining == null) return;
-    if (remaining == 0) throw Exception('模拟的写入失败');
-    writesBeforeFailure = remaining - 1;
-  }
-
-  @override
-  Future<int> runInsert(
-    QueryExecutor executor,
-    String statement,
-    List<Object?> args,
-  ) {
-    _countWriteOrThrow();
-    return super.runInsert(executor, statement, args);
-  }
-
-  @override
-  Future<int> runUpdate(
-    QueryExecutor executor,
-    String statement,
-    List<Object?> args,
-  ) {
-    _countWriteOrThrow();
-    return super.runUpdate(executor, statement, args);
-  }
-
-  @override
-  Future<int> runDelete(
-    QueryExecutor executor,
-    String statement,
-    List<Object?> args,
-  ) {
-    _countWriteOrThrow();
-    return super.runDelete(executor, statement, args);
   }
 }

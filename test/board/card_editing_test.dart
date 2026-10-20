@@ -248,6 +248,27 @@ void main() {
       await harness.dispose(tester);
     });
 
+    testWidgets('保存编辑失败时提示「保存失败，请重试」，仍在编辑，改的内容不丢', (tester) async {
+      final card = await seedCard(tester);
+      await harness.launch(tester);
+      await tapCard(tester, card);
+      await tapCard(tester, card);
+      await tester.enterText(titleField(), '买两盒牛奶');
+      harness.failWrites = true;
+
+      await tapAt(tester, blankSpot);
+
+      expect(find.text('保存失败，请重试'), findsOneWidget);
+      expect(find.widgetWithText(TextField, '买两盒牛奶'), findsOneWidget);
+      final saved = (await harness.readBoard(
+        tester,
+        harness.today,
+      )).cards.single;
+      expect(saved.title, '买牛奶');
+
+      await harness.dispose(tester);
+    });
+
     testWidgets('编辑时把标题清空再点空白处，保留原来的标题', (tester) async {
       final card = await seedCard(tester);
       await harness.launch(tester);
@@ -386,6 +407,24 @@ void main() {
       expect(
         (saved.width, saved.height),
         (TaskCard.defaultWidth + 100, TaskCard.defaultHeight + 50),
+      );
+
+      await harness.dispose(tester);
+    });
+
+    testWidgets('保存大小失败时卡片回到原来的大小，提示「保存失败，请重试」', (tester) async {
+      await launchWithSelectedCard(tester);
+      final before = tester.getRect(cardFinder(card));
+      harness.failWrites = true;
+
+      await dragHandle(tester, const Offset(100, 50));
+
+      expect(tester.getRect(cardFinder(card)), before);
+      expect(find.text('保存失败，请重试'), findsOneWidget);
+      final saved = await savedCard(tester);
+      expect(
+        (saved.width, saved.height),
+        (TaskCard.defaultWidth, TaskCard.defaultHeight),
       );
 
       await harness.dispose(tester);

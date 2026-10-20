@@ -12,10 +12,11 @@ import '../planner/planner_exceptions.dart';
 import '../planner/planner_service.dart';
 import '../planner/task_card.dart';
 import 'board_selection.dart';
+import 'card_drag.dart';
 
 /// 一天的画布：卡片按坐标绝对定位显示。
 ///
-/// 在空白处拖动平移；双指捏合（Android）或 Ctrl+鼠标滚轮（Windows）缩放，
+/// 按住卡片拖动移动它，在空白处拖动平移；双指捏合（Android）或 Ctrl+鼠标滚轮（Windows）缩放，
 /// 不按 Ctrl 滚动滚轮不缩放。双击空白处新建卡片，单击空白处退出编辑、
 /// 取消选中。
 class BoardCanvas extends ConsumerStatefulWidget {
@@ -57,6 +58,13 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
 
   /// 最近一次双击空白处的位置（画布可视区域里的坐标）。
   Offset? _doubleTapPosition;
+
+  /// 拖动卡片的状态机，和正在拖卡片的指针。
+  final _drag = CardDragMachine();
+  int? _dragPointer;
+
+  /// 松手后正在保存的新位置；保存好的位置从数据库回来后清掉。
+  ({String cardId, Offset position})? _dropping;
 
   BoardSelectionController get _selection =>
       ref.read(boardSelectionProvider.notifier);
@@ -107,6 +115,63 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
     await service.resizeCard(card.id, width: size.width, height: size.height);
   });
 
+  /// 按在卡片上的指针事件交给拖动状态机。同一时间只跟踪一个指针。
+  void _onCardPointer(TaskCard card, PointerEvent event) {
+    switch (event) {
+      case PointerDownEvent() when _dragPointer == null:
+        // 桌面上只有鼠标左键能拖；触摸也算左键。
+        if (event.buttons != kPrimaryButton) return;
+        _dragPointer = event.pointer;
+        _drag.down(
+          card.id,
+          origin: Offset(card.x, card.y),
+          pointer: _globalToCanvas(event.position),
+          at: event.timeStamp,
+          slop: computePanSlop(
+            event.kind,
+            MediaQuery.maybeGestureSettingsOf(context),
+          ),
+        );
+      case PointerMoveEvent() when event.pointer == _dragPointer:
+        setState(
+          () =>
+              _drag.move(_globalToCanvas(event.position), at: event.timeStamp),
+        );
+      case PointerUpEvent() when event.pointer == _dragPointer:
+        _dragPointer = null;
+        final drop = _drag.up();
+        if (drop != null) _moveCard(drop.cardId, drop.position);
+      case PointerCancelEvent() when event.pointer == _dragPointer:
+        _onCardDragCancel();
+    }
+  }
+
+  /// 卡片的手势被别的操作抢走（比如捏合缩放画布）：卡片回到原处。
+  void _onCardDragCancel() {
+    _dragPointer = null;
+    setState(_drag.cancel);
+  }
+
+  /// 保存拖动后的位置。保存好之前卡片停在新位置；保存失败时回到原处。
+  Future<void> _moveCard(String cardId, Offset position) async {
+    setState(() => _dropping = (cardId: cardId, position: position));
+    final saved = await _save(() async {
+      final service = await ref.read(plannerServiceProvider.future);
+      await service.moveCard(cardId, x: position.dx, y: position.dy);
+    });
+    if (!saved && mounted) setState(() => _dropping = null);
+  }
+
+  @override
+  void didUpdateWidget(BoardCanvas oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 保存好的位置从数据库回来了，不再需要临时的位置。
+    if (_dropping case (:final cardId, :final position)) {
+      final card = widget.board.cards.where((c) => c.id == cardId).firstOrNull;
+      if (card == null || Offset(card.x, card.y) == position) _dropping = null;
+    }
+  }
+
   /// 执行一个要保存的操作；保存失败时提示，返回 false。
   Future<bool> _save(Future<void> Function() action) async {
     try {
@@ -132,6 +197,18 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
   Widget build(BuildContext context) {
     final cards = widget.board.cards;
     final selection = ref.watch(boardSelectionProvider);
+    // 正在拖动、或者刚松手还在保存的卡片：显示在临时位置，画在所有卡片上面。
+    final lifted = switch (_drag.state) {
+      CardDragging(:final cardId, :final position) => (
+        cardId: cardId,
+        position: position,
+      ),
+      _ => _dropping,
+    };
+    final ordered = [
+      ...cards.where((c) => c.id != lifted?.cardId),
+      ...cards.where((c) => c.id == lifted?.cardId),
+    ];
     final width = cards.fold(0.0, (w, c) => math.max(w, c.x + c.width));
     final height = cards.fold(0.0, (h, c) => math.max(h, c.y + c.height));
     final canvas = Listener(
@@ -159,7 +236,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
             height: height + _canvasPadding,
             child: Stack(
               children: [
-                for (final card in cards)
+                for (final card in ordered)
                   _CardView(
                     key: ValueKey(card.id),
                     card: card,
@@ -170,7 +247,12 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
                         selection is EditingCard && selection.cardId == card.id
                         ? selection
                         : null,
+                    position: card.id == lifted?.cardId
+                        ? lifted!.position
+                        : null,
                     onTap: () => _save(() => _selection.tapCard(card)),
+                    onDragPointer: (event) => _onCardPointer(card, event),
+                    onDragCancel: _onCardDragCancel,
                     globalToCanvas: _globalToCanvas,
                     onResize: (size) => _resizeCard(card, size),
                   ),
@@ -221,7 +303,10 @@ class _CardView extends StatefulWidget {
     required this.card,
     required this.selected,
     required this.editing,
+    required this.position,
     required this.onTap,
+    required this.onDragPointer,
+    required this.onDragCancel,
     required this.globalToCanvas,
     required this.onResize,
   });
@@ -231,7 +316,17 @@ class _CardView extends StatefulWidget {
 
   /// 正在编辑这张卡片时不为 null，卡片上显示编辑框。
   final EditingCard? editing;
+
+  /// 拖动中或者刚拖完还没保存好时，卡片左上角的临时位置；平时为 null。
+  final Offset? position;
+
   final VoidCallback onTap;
+
+  /// 按在卡片上的指针事件，交给画布的拖动状态机。
+  final void Function(PointerEvent event) onDragPointer;
+
+  /// 卡片的手势被别的操作抢走了。
+  final VoidCallback onDragCancel;
 
   /// 把屏幕坐标换算成画布坐标。
   final Offset Function(Offset global) globalToCanvas;
@@ -299,8 +394,8 @@ class _CardViewState extends State<_CardView> {
     final editing = widget.editing;
     return Positioned(
       key: BoardCanvas.cardKey(card.id),
-      left: card.x,
-      top: card.y,
+      left: widget.position?.dx ?? card.x,
+      top: widget.position?.dy ?? card.y,
       width: _resizing?.width ?? card.width,
       height: _resizing?.height ?? card.height,
       child: GestureDetector(
@@ -308,15 +403,28 @@ class _CardViewState extends State<_CardView> {
         // 双击卡片是「完成」，由 #20 接上。现在就注册双击，单击从一开始
         // 就和最终版本一样，等双击判定时间过了才生效。
         onDoubleTap: () {},
+        // 长按是菜单，由 #16 接上。现在就注册长按，按住不动不会变成单击。
+        onLongPress: editing == null ? () {} : null,
+        // 拖动由拖动状态机处理，这里只用来抢下手势，画布不跟着平移。
+        // 正在编辑的卡片不能拖，在编辑框里拖动是选文字。
+        onPanStart: editing == null ? (_) {} : null,
+        onPanCancel: editing == null ? widget.onDragCancel : null,
         child: Stack(
           children: [
             Positioned.fill(
-              child: _CardFrame(
-                colorArgb: card.colorArgb,
-                child: switch (editing) {
-                  final editing? => _CardEditor(editing: editing),
-                  null => _CardContent(card: card),
-                },
+              // 手柄盖在卡片上面，按在手柄上不会走到这里。
+              child: Listener(
+                onPointerDown: editing == null ? widget.onDragPointer : null,
+                onPointerMove: editing == null ? widget.onDragPointer : null,
+                onPointerUp: editing == null ? widget.onDragPointer : null,
+                onPointerCancel: editing == null ? widget.onDragPointer : null,
+                child: _CardFrame(
+                  colorArgb: card.colorArgb,
+                  child: switch (editing) {
+                    final editing? => _CardEditor(editing: editing),
+                    null => _CardContent(card: card),
+                  },
+                ),
               ),
             ),
             if (widget.selected)
