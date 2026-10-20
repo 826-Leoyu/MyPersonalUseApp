@@ -293,23 +293,80 @@ void main() {
       expect(board.cards.single.id, card.id);
     });
 
-    test('永久删除时写入失败整体回滚，卡片和连线都还在', () async {
+    // 永久删除依次删除连线、历史记录、卡片，共 3 次写入。
+    // 在每一步失败都应该整体回滚。
+    for (final step in [1, 2, 3]) {
+      test('永久删除在第 $step 步写入失败时整体回滚，卡片和连线都还在', () async {
+        final a = await newCard('A');
+        final b = await newCard('B');
+        final link = await harness.service.toggleLink(a.id, b.id);
+        await harness.addCarryOverRecord(b.id);
+        await harness.service.deleteCard(b.id);
+        harness.failWritesAfter(step - 1);
+
+        await expectLater(
+          harness.service.deleteForever(b.id),
+          throwsA(isA<StorageFailure>()),
+        );
+
+        harness.failWrites = false;
+        final trash = await harness.service.watchTrash().first;
+        expect(trash.single.card.id, b.id);
+        await harness.service.restoreCard(b.id);
+        final board = await harness.service.watchDay(harness.today).first;
+        expect(board.links.single.id, link.linkId);
+      });
+
+      test('清空回收站在第 $step 步写入失败时整体回滚，回收站里的卡片和连线都还在', () async {
+        final a = await newCard('A');
+        final b = await newCard('B');
+        final c = await newCard('C');
+        final ab = await harness.service.toggleLink(a.id, b.id);
+        final ac = await harness.service.toggleLink(a.id, c.id);
+        await harness.addCarryOverRecord(b.id);
+        await harness.service.deleteCard(b.id);
+        await harness.service.deleteCard(c.id);
+        harness.failWritesAfter(step - 1);
+
+        await expectLater(
+          harness.service.emptyTrash(),
+          throwsA(isA<StorageFailure>()),
+        );
+
+        harness.failWrites = false;
+        final trash = await harness.service.watchTrash().first;
+        expect(trash.map((t) => t.card.id), unorderedEquals([b.id, c.id]));
+        await harness.service.restoreCard(b.id);
+        await harness.service.restoreCard(c.id);
+        final board = await harness.service.watchDay(harness.today).first;
+        expect(
+          board.links.map((l) => l.id),
+          unorderedEquals([ab.linkId, ac.linkId]),
+        );
+      });
+    }
+
+    test('回滚后可以再次永久删除，连线和历史记录一起删掉', () async {
       final a = await newCard('A');
       final b = await newCard('B');
       final link = await harness.service.toggleLink(a.id, b.id);
+      // 历史记录没有删掉时，外键约束会让删除卡片失败。
+      await harness.addCarryOverRecord(b.id);
       await harness.service.deleteCard(b.id);
-      harness.failWrites = true;
-
+      harness.failWritesAfter(2);
       await expectLater(
         harness.service.deleteForever(b.id),
         throwsA(isA<StorageFailure>()),
       );
-
       harness.failWrites = false;
-      expect((await harness.service.watchTrash().first).single.card.id, b.id);
-      await harness.service.restoreCard(b.id);
-      final board = await harness.service.watchDay(harness.today).first;
-      expect(board.links.single.id, link.linkId);
+
+      await harness.service.deleteForever(b.id);
+
+      expect(await harness.service.watchTrash().first, isEmpty);
+      await expectLater(
+        harness.service.restoreLink(link.linkId),
+        throwsA(isA<NotFound>()),
+      );
     });
   });
 
@@ -337,6 +394,12 @@ void main() {
 
     test('第 10 天里还剩 1 天', () async {
       expect(await daysLeftAfter(const Duration(days: 9, hours: 23)), 1);
+    });
+
+    test('差 1 毫秒满 10 天时仍然还剩 1 天', () async {
+      final justBefore =
+          const Duration(days: 10) - const Duration(milliseconds: 1);
+      expect(await daysLeftAfter(justBefore), 1);
     });
 
     test('满 10 天时是 0，超过以后也不会变成负数', () async {

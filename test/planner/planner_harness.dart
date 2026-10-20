@@ -25,7 +25,11 @@ class PlannerHarness {
   DayKey get today => DayKey.fromDateTime(now);
 
   /// 打开后，所有写入都会报错；读取不受影响。
-  set failWrites(bool value) => _failingWrites.enabled = value;
+  set failWrites(bool value) =>
+      _failingWrites.writesBeforeFailure = value ? 0 : null;
+
+  /// 之后的 [count] 次写入成功，再往后的写入都报错，用来模拟事务中途失败。
+  void failWritesAfter(int count) => _failingWrites.writesBeforeFailure = count;
 
   void _open() {
     _database = PlannerDatabase(
@@ -102,10 +106,14 @@ class PlannerHarness {
 
 /// 只用来模拟存储失败，不用来验证调用次数。
 class _FailingWrites extends QueryInterceptor {
-  bool enabled = false;
+  /// 还允许成功的写入次数；为 null 时不模拟失败。
+  int? writesBeforeFailure;
 
-  void _throwIfEnabled() {
-    if (enabled) throw Exception('模拟的写入失败');
+  void _countWriteOrThrow() {
+    final remaining = writesBeforeFailure;
+    if (remaining == null) return;
+    if (remaining == 0) throw Exception('模拟的写入失败');
+    writesBeforeFailure = remaining - 1;
   }
 
   @override
@@ -114,7 +122,7 @@ class _FailingWrites extends QueryInterceptor {
     String statement,
     List<Object?> args,
   ) {
-    _throwIfEnabled();
+    _countWriteOrThrow();
     return super.runInsert(executor, statement, args);
   }
 
@@ -124,7 +132,7 @@ class _FailingWrites extends QueryInterceptor {
     String statement,
     List<Object?> args,
   ) {
-    _throwIfEnabled();
+    _countWriteOrThrow();
     return super.runUpdate(executor, statement, args);
   }
 
@@ -134,7 +142,7 @@ class _FailingWrites extends QueryInterceptor {
     String statement,
     List<Object?> args,
   ) {
-    _throwIfEnabled();
+    _countWriteOrThrow();
     return super.runDelete(executor, statement, args);
   }
 }
