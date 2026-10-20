@@ -217,6 +217,9 @@ class PlannerService {
   }
 
   /// 物理删除 [cardIds] 这些卡片，以及和它们相关的所有连线和历史记录。
+  ///
+  /// 先删连线和历史记录，再删卡片（外键约束要求）。回收站测试按这 3 次写入
+  /// 模拟中途失败，改动写入次数或顺序时要同步修改测试。
   Future<void> _purgeCards(List<String> cardIds) async {
     await (_db.delete(_db.links)
           ..where((l) => l.fromCardId.isIn(cardIds) | l.toCardId.isIn(cardIds)))
