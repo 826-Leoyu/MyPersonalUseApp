@@ -1,3 +1,4 @@
+import 'carry_over_record.dart';
 import 'link.dart';
 import 'task_card.dart';
 
@@ -6,6 +7,7 @@ class DayBoard {
   const DayBoard({
     required this.cards,
     required this.links,
+    required this.carryOverRecords,
     required this.completedCount,
   });
 
@@ -14,6 +16,9 @@ class DayBoard {
 
   /// 显示在画布上的连线。
   final List<Link> links;
+
+  /// 从这一天顺延走的卡片留下的历史记录，按顺延时间排列。
+  final List<CarryOverRecord> carryOverRecords;
 
   /// 这一天已完成、不在回收站的卡片数。
   final int completedCount;

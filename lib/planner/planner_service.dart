@@ -4,11 +4,14 @@ import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
 import '../storage/planner_database.dart';
+import 'carry_over_layout.dart';
+import 'carry_over_record.dart';
 import 'day_board.dart';
 import 'day_counts.dart';
 import 'day_key.dart';
 import 'link.dart';
 import 'link_kind.dart';
+import 'maintenance_summary.dart';
 import 'planner_exceptions.dart';
 import 'task_card.dart';
 import 'trashed_card.dart';
@@ -323,12 +326,140 @@ class PlannerService {
     return query.getSingleOrNull();
   }
 
-  /// 持续推送 [dayKey] 这一天画布上要显示的内容。卡片或连线变化时都会推送。
+  /// 每日维护：今天比上次维护的日期晚时，把今天以前没完成的卡片顺延到今天，
+  /// 并记下今天为维护日期。
+  ///
+  /// 幂等：同一天再执行什么都不改。系统时钟被调回过去时跳过顺延，
+  /// 也不把维护日期改小。所有修改在一个事务里。
+  // TODO(#12): 先清理回收站里过期的卡片，并填写 cleanedCount。
+  Future<MaintenanceSummary> runDailyMaintenance() {
+    return _write(() async {
+      final today = _today;
+      final lastDay = await _lastMaintenanceDay();
+      if (lastDay != null && today <= lastDay) {
+        return const MaintenanceSummary(carriedCount: 0, cleanedCount: 0);
+      }
+      final pastCards =
+          await (_db.select(_db.taskCards)..where(
+                (c) =>
+                    c.dayKey.isSmallerThanValue(today.toString()) &
+                    c.status.equalsValue(CardStatus.active) &
+                    c.deletedAt.isNull(),
+              ))
+              .get();
+      await _carryOver(pastCards, today);
+      await _db
+          .into(_db.appMeta)
+          .insertOnConflictUpdate(
+            AppMetaCompanion.insert(
+              key: _lastMaintenanceDayKey,
+              value: today.toString(),
+            ),
+          );
+      return MaintenanceSummary(
+        carriedCount: pastCards.length,
+        cleanedCount: 0,
+      );
+    });
+  }
+
+  static const _lastMaintenanceDayKey = 'lastMaintenanceDay';
+
+  /// 上次执行每日维护的日期；从来没执行过时为 null。
+  Future<DayKey?> _lastMaintenanceDay() async {
+    final entry = await (_db.select(
+      _db.appMeta,
+    )..where((m) => m.key.equals(_lastMaintenanceDayKey))).getSingleOrNull();
+    return entry == null ? null : DayKey.parse(entry.value);
+  }
+
+  /// 按 spec「顺延排布算法」把 [cards] 顺延到 [toDay]：每张卡片在出发的那天
+  /// 留一条历史记录，[toDay] 已有的卡片右移腾出左上角，顺延卡片按
+  /// [layoutCarryOver] 摆好并标记为顺延过。[cards] 为空时什么都不改。
+  ///
+  /// 要在调用方的事务里执行。每日维护和单张卡片立即顺延（#12）共用这个方法。
+  Future<void> _carryOver(List<TaskCardRow> cards, DayKey toDay) async {
+    if (cards.isEmpty) return;
+    final isOnToDay = _db.taskCards.dayKey.equals(toDay.toString());
+    final minX = _db.taskCards.x.min();
+    final toDayMinX =
+        (await (_db.selectOnly(_db.taskCards)
+                  ..addColumns([minX])
+                  ..where(isOnToDay))
+                .getSingle())
+            .read(minX);
+    final layout = layoutCarryOver(
+      [
+        for (final card in cards)
+          (
+            id: card.id,
+            dayKey: DayKey.parse(card.dayKey),
+            x: card.x,
+            y: card.y,
+            width: card.width,
+            height: card.height,
+            zIndex: card.zIndex,
+          ),
+      ],
+      todayMinX: toDayMinX,
+      todayMaxZIndex: await _maxZIndex(toDay),
+    );
+    final now = _nowMillis;
+    // 先移今天已有的卡片（包括已完成和回收站里的），再把顺延卡片搬过来。
+    if (layout.todayShift != 0) {
+      await (_db.update(_db.taskCards)..where((_) => isOnToDay)).write(
+        TaskCardsCompanion.custom(
+          x: _db.taskCards.x + Constant(layout.todayShift),
+          updatedAt: Constant(now),
+        ),
+      );
+    }
+    for (final card in cards) {
+      await _db
+          .into(_db.carryOverRecords)
+          .insert(
+            CarryOverRecordsCompanion.insert(
+              id: _generateId(),
+              cardId: card.id,
+              fromDayKey: card.dayKey,
+              toDayKey: toDay.toString(),
+              x: card.x,
+              y: card.y,
+              width: card.width,
+              height: card.height,
+              titleSnapshot: card.title,
+              colorArgb: card.colorArgb,
+              carriedAt: now,
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
+      final placement = layout.placements[card.id]!;
+      await (_db.update(
+        _db.taskCards,
+      )..where((c) => c.id.equals(card.id))).write(
+        TaskCardsCompanion(
+          dayKey: Value(toDay.toString()),
+          x: Value(placement.x),
+          y: Value(placement.y),
+          zIndex: Value(placement.zIndex),
+          carriedOver: const Value(true),
+          updatedAt: Value(now),
+        ),
+      );
+    }
+  }
+
+  /// 持续推送 [dayKey] 这一天画布上要显示的内容。卡片、连线或历史记录变化时
+  /// 都会推送。
   Stream<DayBoard> watchDay(DayKey dayKey) {
-    // 画布内容来自卡片和连线两张表，用一个只声明 readsFrom 的查询监听
-    // 两张表的变化，每次变化时在一个事务里重新读出完整的画布，保证一致。
+    // 画布内容来自卡片、连线、历史记录三张表，用一个只声明 readsFrom 的查询
+    // 监听三张表的变化，每次变化时在一个事务里重新读出完整的画布，保证一致。
     final changes = _db
-        .customSelect('SELECT 1', readsFrom: {_db.taskCards, _db.links})
+        .customSelect(
+          'SELECT 1',
+          readsFrom: {_db.taskCards, _db.links, _db.carryOverRecords},
+        )
         .watch();
     return changes.asyncMap((_) => _db.transaction(() => _loadBoard(dayKey)));
   }
@@ -431,6 +562,15 @@ class PlannerService {
                   l.toCardId.isIn(cardIds),
             ))
             .get();
+    final recordRows =
+        await (_db.select(_db.carryOverRecords)
+              ..where((r) => r.fromDayKey.equals(dayKey.toString()))
+              // 同一毫秒顺延的记录按 id 排，保证顺序稳定。
+              ..orderBy([
+                (r) => OrderingTerm.asc(r.carriedAt),
+                (r) => OrderingTerm.asc(r.id),
+              ]))
+            .get();
     final count = _db.taskCards.id.count();
     final countQuery = _db.selectOnly(_db.taskCards)
       ..addColumns([count])
@@ -438,6 +578,7 @@ class PlannerService {
     return DayBoard(
       cards: cardRows.map(_toCard).toList(),
       links: linkRows.map(_toLink).toList(),
+      carryOverRecords: recordRows.map(_toRecord).toList(),
       completedCount: (await countQuery.getSingle()).read(count)!,
     );
   }
@@ -539,6 +680,22 @@ class PlannerService {
     toCardId: row.toCardId,
     kind: row.kind,
     deletedAt: _fromMillis(row.deletedAt),
+    createdAt: _fromMillis(row.createdAt)!,
+    updatedAt: _fromMillis(row.updatedAt)!,
+  );
+
+  static CarryOverRecord _toRecord(CarryOverRecordRow row) => CarryOverRecord(
+    id: row.id,
+    cardId: row.cardId,
+    fromDayKey: DayKey.parse(row.fromDayKey),
+    toDayKey: DayKey.parse(row.toDayKey),
+    x: row.x,
+    y: row.y,
+    width: row.width,
+    height: row.height,
+    titleSnapshot: row.titleSnapshot,
+    colorArgb: row.colorArgb,
+    carriedAt: _fromMillis(row.carriedAt)!,
     createdAt: _fromMillis(row.createdAt)!,
     updatedAt: _fromMillis(row.updatedAt)!,
   );
