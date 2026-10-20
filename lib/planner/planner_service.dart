@@ -399,7 +399,7 @@ class PlannerService {
     );
   }
 
-  /// 10 − 已删除的天数，不满一天的部分向上取整，最小为 0。
+  /// [trashRetention] 减去已删除的时间，按天计，不满一天的部分向上取整，最小为 0。
   int _daysLeft(int deletedAtMillis) {
     const dayMillis = Duration.millisecondsPerDay;
     final leftMillis =

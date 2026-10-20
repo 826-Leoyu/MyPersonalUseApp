@@ -41,8 +41,8 @@ void main() {
       final c = await newCard('C');
       await harness.service.completeCard(c.id);
 
-      for (final (card, hour) in [(b, 10), (c, 11), (a, 14)]) {
-        harness.now = DateTime(2026, 10, 20, hour);
+      for (final card in [b, c, a]) {
+        harness.now = harness.now.add(const Duration(hours: 1));
         await harness.service.deleteCard(card.id);
       }
 
