@@ -9,6 +9,5 @@ class MaintenanceSummary {
   final int carriedCount;
 
   /// 这次从回收站永久删除的卡片数。
-  // TODO(#12): 实现回收站自动清理后填写真实数量。
   final int cleanedCount;
 }

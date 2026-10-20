@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:characters/characters.dart';
 import 'package:clock/clock.dart';
 import 'package:drift/drift.dart';
@@ -149,10 +151,10 @@ class PlannerService {
     });
   }
 
-  /// 取消完成：卡片恢复为未完成，回到画布上原来的位置和层级。
+  /// 取消完成：卡片恢复为未完成，回到画布上原来的位置和层级。卡片的日期
+  /// 已经过去时，按顺延规则（单张为一组）立即搬到今天并留下历史记录。
   ///
   /// 卡片不是已完成、或者在回收站里时抛出 [InvalidState]。
-  // TODO(#12): 卡片日期早于今天时，按顺延规则立即搬到今天并生成历史记录。
   Future<void> uncompleteCard(String id) async {
     await _write(() async {
       final card = await _requireCard(id);
@@ -166,6 +168,7 @@ class PlannerService {
           completedAt: Value(null),
         ),
       );
+      await _carryOverIfPast(id);
     });
   }
 
@@ -180,16 +183,17 @@ class PlannerService {
     });
   }
 
-  /// 把卡片从回收站拿出来，回到原来的日期、位置和状态。
+  /// 把卡片从回收站拿出来，回到原来的日期、位置和状态。未完成卡片的日期
+  /// 已经过去时，按顺延规则（单张为一组）立即搬到今天并留下历史记录。
   ///
   /// 不在回收站里时静默成功（删除的撤销提示和撤销栈可能先后恢复同一张卡片）；
   /// 卡片不存在时抛出 [NotFound]。
-  // TODO(#12): 未完成卡片的日期早于今天时，按顺延规则立即搬到今天并生成历史记录。
   Future<void> restoreCard(String id) async {
     await _write(() async {
       final card = await _requireCard(id);
       if (card.deletedAt == null) return;
       await _updateCard(id, const TaskCardsCompanion(deletedAt: Value(null)));
+      if (card.status == CardStatus.active) await _carryOverIfPast(id);
     });
   }
 
@@ -326,18 +330,18 @@ class PlannerService {
     return query.getSingleOrNull();
   }
 
-  /// 每日维护：今天比上次维护的日期晚时，把今天以前没完成的卡片顺延到今天，
-  /// 并记下今天为维护日期。
+  /// 每日维护：先永久删除回收站里过期的卡片（每次都执行）；今天比上次维护的
+  /// 日期晚时，再把今天以前没完成的卡片顺延到今天，并记下今天为维护日期。
   ///
-  /// 幂等：同一天再执行什么都不改。系统时钟被调回过去时跳过顺延，
+  /// 幂等：同一天再执行不再顺延。系统时钟被调回过去时跳过顺延，
   /// 也不把维护日期改小。所有修改在一个事务里。
-  // TODO(#12): 先清理回收站里过期的卡片，并填写 cleanedCount。
   Future<MaintenanceSummary> runDailyMaintenance() {
     return _write(() async {
+      final cleanedCount = await _purgeExpiredTrash();
       final today = _today;
       final lastDay = await _lastMaintenanceDay();
       if (lastDay != null && today <= lastDay) {
-        return const MaintenanceSummary(carriedCount: 0, cleanedCount: 0);
+        return MaintenanceSummary(carriedCount: 0, cleanedCount: cleanedCount);
       }
       final pastCards =
           await (_db.select(_db.taskCards)..where(
@@ -358,9 +362,28 @@ class PlannerService {
           );
       return MaintenanceSummary(
         carriedCount: pastCards.length,
-        cleanedCount: 0,
+        cleanedCount: cleanedCount,
       );
     });
+  }
+
+  /// 永久删除在回收站里放了超过 [trashRetention] 的卡片，返回删除了几张。
+  ///
+  /// 按从删除时间起实际经过的时间算（和 [watchTrash] 的剩余天数同一个基准），
+  /// 恰好满 [trashRetention] 时还保留。没有过期卡片时不写入。
+  /// 要在调用方的事务里执行。
+  Future<int> _purgeExpiredTrash() async {
+    final expiredBefore = _nowMillis - trashRetention.inMilliseconds;
+    final expiredIds =
+        await (_db.selectOnly(_db.taskCards)
+              ..addColumns([_db.taskCards.id])
+              ..where(
+                _db.taskCards.deletedAt.isSmallerThanValue(expiredBefore),
+              ))
+            .map((row) => row.read(_db.taskCards.id)!)
+            .get();
+    if (expiredIds.isNotEmpty) await _purgeCards(expiredIds);
+    return expiredIds.length;
   }
 
   static const _lastMaintenanceDayKey = 'lastMaintenanceDay';
@@ -373,11 +396,31 @@ class PlannerService {
     return entry == null ? null : DayKey.parse(entry.value);
   }
 
+  /// 卡片 [id] 的日期早于有效的今天（见 [_effectiveToday]）时，把它单独顺延到
+  /// 有效的今天。取消完成和恢复卡片在改完状态后调用，要在调用方的事务里执行。
+  Future<void> _carryOverIfPast(String id) async {
+    final today = await _effectiveToday();
+    final row = await (_db.select(
+      _db.taskCards,
+    )..where((c) => c.id.equals(id))).getSingle();
+    if (DayKey.parse(row.dayKey) < today) await _carryOver([row], today);
+  }
+
+  /// 用户操作触发立即顺延时的"今天"：时钟的今天和上次维护日期中较晚的一个。
+  ///
+  /// 系统时钟被调回过去时，维护日期以前的卡片已经顺延过，按时钟的今天顺延
+  /// 会把卡片搬到比维护日期还早的日子，下次维护时又被搬走。
+  Future<DayKey> _effectiveToday() async {
+    final today = _today;
+    final lastDay = await _lastMaintenanceDay();
+    return lastDay != null && lastDay > today ? lastDay : today;
+  }
+
   /// 按 spec「顺延排布算法」把 [cards] 顺延到 [toDay]：每张卡片在出发的那天
   /// 留一条历史记录，[toDay] 已有的卡片右移腾出左上角，顺延卡片按
   /// [layoutCarryOver] 摆好并标记为顺延过。[cards] 为空时什么都不改。
   ///
-  /// 要在调用方的事务里执行。每日维护和单张卡片立即顺延（#12）共用这个方法。
+  /// 要在调用方的事务里执行。每日维护和单张卡片立即顺延共用这个方法。
   Future<void> _carryOver(List<TaskCardRow> cards, DayKey toDay) async {
     if (cards.isEmpty) return;
     final isOnToDay = _db.taskCards.dayKey.equals(toDay.toString());
@@ -533,12 +576,16 @@ class PlannerService {
     );
   }
 
-  /// [trashRetention] 减去已删除的时间，按天计，不满一天的部分向上取整，最小为 0。
+  /// [trashRetention] 减去已删除的时间，按天计，不满一天的部分向上取整，
+  /// 限制在 0 到 [trashRetention] 的天数之间（系统时钟被调回删除时间以前时不超过上限）。
   int _daysLeft(int deletedAtMillis) {
     const dayMillis = Duration.millisecondsPerDay;
     final leftMillis =
         trashRetention.inMilliseconds - (_nowMillis - deletedAtMillis);
-    return leftMillis <= 0 ? 0 : (leftMillis + dayMillis - 1) ~/ dayMillis;
+    final days = leftMillis <= 0
+        ? 0
+        : (leftMillis + dayMillis - 1) ~/ dayMillis;
+    return min(days, trashRetention.inDays);
   }
 
   Future<DayBoard> _loadBoard(DayKey dayKey) async {
