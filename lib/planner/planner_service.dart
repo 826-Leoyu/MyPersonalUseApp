@@ -380,12 +380,12 @@ class PlannerService {
   /// 要在调用方的事务里执行。每日维护和单张卡片立即顺延（#12）共用这个方法。
   Future<void> _carryOver(List<TaskCardRow> cards, DayKey toDay) async {
     if (cards.isEmpty) return;
-    final toDayCards = _db.taskCards.dayKey.equals(toDay.toString());
+    final isOnToDay = _db.taskCards.dayKey.equals(toDay.toString());
     final minX = _db.taskCards.x.min();
     final toDayMinX =
         (await (_db.selectOnly(_db.taskCards)
                   ..addColumns([minX])
-                  ..where(toDayCards))
+                  ..where(isOnToDay))
                 .getSingle())
             .read(minX);
     final layout = layoutCarryOver(
@@ -407,7 +407,7 @@ class PlannerService {
     final now = _nowMillis;
     // 先移今天已有的卡片（包括已完成和回收站里的），再把顺延卡片搬过来。
     if (layout.todayShift != 0) {
-      await (_db.update(_db.taskCards)..where((_) => toDayCards)).write(
+      await (_db.update(_db.taskCards)..where((_) => isOnToDay)).write(
         TaskCardsCompanion.custom(
           x: _db.taskCards.x + Constant(layout.todayShift),
           updatedAt: Constant(now),

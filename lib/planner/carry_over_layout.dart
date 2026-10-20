@@ -58,14 +58,14 @@ CarryOverLayout layoutCarryOver(
   };
   final placements = <String, CarryOverPlacement>{};
   var groupTop = _margin;
-  var width = 0.0;
+  var regionWidth = 0.0;
   for (final day in days) {
     final group = groups[day]!;
     final left = group.map((c) => c.x).reduce(min);
     final top = group.map((c) => c.y).reduce(min);
     final right = group.map((c) => c.x + c.width).reduce(max);
     final bottom = group.map((c) => c.y + c.height).reduce(max);
-    width = max(width, right - left);
+    regionWidth = max(regionWidth, right - left);
     for (final card in group) {
       placements[card.id] = (
         x: _margin + card.x - left,
@@ -79,7 +79,7 @@ CarryOverLayout layoutCarryOver(
   // 所以再保证移动后最左边的卡片离顺延区右边缘至少 48。
   final todayShift = todayMinX == null || placements.isEmpty
       ? 0.0
-      : max(width + _gap, _margin + width + _gap - todayMinX);
+      : max(regionWidth + _gap, _margin + regionWidth + _gap - todayMinX);
   return (placements: placements, todayShift: todayShift);
 }
 

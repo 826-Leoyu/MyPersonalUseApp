@@ -264,7 +264,7 @@ void main() {
       final yesterday = harness.today;
       advanceDays(1);
       await harness.service.runDailyMaintenance();
-      final late = await cardMadeDaysAgo(1, '晚到');
+      final lateCard = await cardMadeDaysAgo(1, '晚到');
       await harness.reopen();
       harness.now = harness.now.add(const Duration(hours: 5));
 
@@ -275,19 +275,34 @@ void main() {
       expect((today.cards.single.x, today.cards.single.y), (24.0, 24.0));
       final past = await boardOf(yesterday);
       expect(past.carryOverRecords, hasLength(1));
-      expect(past.cards.single.id, late.id);
+      expect(past.cards.single.id, lateCard.id);
     });
 
     test('新的一天没有卡片可顺延也记下维护日期，同一天再执行不顺延', () async {
       advanceDays(1);
       final first = await harness.service.runDailyMaintenance();
       expect(first.carriedCount, 0);
-      final late = await cardMadeDaysAgo(1, '晚到');
+      final lateCard = await cardMadeDaysAgo(1, '晚到');
 
       final second = await harness.service.runDailyMaintenance();
 
       expect(second.carriedCount, 0);
-      expect((await harness.service.findCard(late.id)).dayKey, late.dayKey);
+      expect(
+        (await harness.service.findCard(lateCard.id)).dayKey,
+        lateCard.dayKey,
+      );
+    });
+
+    test('App 开着跨过午夜，再次维护时顺延', () async {
+      harness.now = DateTime(2026, 10, 20, 23, 59);
+      final card = await newCard('A');
+      await harness.service.runDailyMaintenance();
+      harness.now = DateTime(2026, 10, 21, 0, 1);
+
+      final summary = await harness.service.runDailyMaintenance();
+
+      expect(summary.carriedCount, 1);
+      expect((await harness.service.findCard(card.id)).dayKey, harness.today);
     });
 
     test('时钟回拨后不顺延，也不把维护日期改小', () async {
