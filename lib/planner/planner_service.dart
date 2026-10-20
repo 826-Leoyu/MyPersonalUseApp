@@ -332,6 +332,20 @@ class PlannerService {
     return query.getSingleOrNull();
   }
 
+  /// 打开存储：建立连接，并完成建表或结构升级。打不开时抛出 [StorageFailure]。
+  ///
+  /// App 启动时先调用它，确认存储可用后再显示画布。
+  Future<void> open() async {
+    try {
+      await _db.customSelect('SELECT 1').get();
+    } on Exception catch (e) {
+      throw StorageFailure('数据库打不开', e);
+    }
+  }
+
+  /// 关闭存储连接。连接没有打开成功时，关闭会再抛出一次打开时的错误。
+  Future<void> close() => _db.close();
+
   /// 每日维护：先永久删除回收站里过期的卡片（每次都执行）；今天比上次维护的
   /// 日期晚时，再把今天以前没完成的卡片顺延到今天，并记下今天为维护日期。
   ///
