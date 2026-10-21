@@ -192,6 +192,21 @@ void main() {
   });
 
   group('画布上显示的连线', () {
+    test('按建立时间排列（也是从下到上的绘制顺序），不随写入顺序和 ID 变化', () async {
+      final a = await newCard('A');
+      final others = [for (var i = 0; i < 5; i++) await newCard('B$i')];
+      // 每建一条连线，系统时钟往回拨一小时：后建的连线建立时间更早。
+      for (final other in others) {
+        await harness.service.toggleLink(a.id, other.id);
+        harness.now = harness.now.subtract(const Duration(hours: 1));
+      }
+
+      expect(
+        (await linksOnBoard()).map((l) => l.toCardId),
+        others.reversed.map((c) => c.id),
+      );
+    });
+
     test('一端完成后连线不显示，取消完成后重新显示', () async {
       final a = await newCard('A');
       final b = await newCard('B');
