@@ -27,6 +27,13 @@ final class CardSelected extends BoardSelection {
   final String cardId;
 }
 
+/// 选中了一条连线：高亮，中点显示 ✂️。
+final class LinkSelected extends BoardSelection {
+  const LinkSelected(this.linkId);
+
+  final String linkId;
+}
+
 /// 正在编辑卡片的标题和备注。退出编辑时保存。
 ///
 /// [title] 和 [note] 是编辑框里的当前内容，由编辑框随输入更新，
@@ -79,6 +86,14 @@ class BoardSelectionController extends Notifier<BoardSelection> {
     }
   }
 
+  /// 单击（或双击）连线：先保存正在编辑的卡片，再选中这条连线。
+  ///
+  /// 保存失败时抛出 PlannerException，仍然停在编辑状态，内容不丢。
+  Future<void> tapLink(String linkId) async {
+    await _finishEditing();
+    state = LinkSelected(linkId);
+  }
+
   /// 卡片菜单里的「编辑」：先保存正在编辑的其他卡片，再编辑这张。
   ///
   /// 保存失败时抛出 PlannerException，仍然停在原来的编辑状态，内容不丢。
@@ -95,6 +110,23 @@ class BoardSelectionController extends Notifier<BoardSelection> {
     await service.deleteCard(cardId);
     if (state case CardSelected(cardId: final selected)
         when selected == cardId) {
+      state = const NothingSelected();
+    }
+  }
+
+  /// 断开连线（✂️ 或右键菜单）；它是选中的就取消选中。
+  ///
+  /// 断开失败时抛出 PlannerException，选中状态不变。
+  Future<void> removeLink(String linkId) async {
+    final service = await ref.read(plannerServiceProvider.future);
+    await service.removeLink(linkId);
+    forgetLink(linkId);
+  }
+
+  /// 连线不再显示了（断开、或者一端完成、删除了）：它是选中的就取消选中。
+  void forgetLink(String linkId) {
+    if (state case LinkSelected(linkId: final selected)
+        when selected == linkId) {
       state = const NothingSelected();
     }
   }

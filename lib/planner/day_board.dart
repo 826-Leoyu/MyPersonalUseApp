@@ -14,7 +14,7 @@ class DayBoard {
   /// 显示在画布上的卡片：未完成、不在回收站，按 zIndex 从下到上排列。
   final List<TaskCard> cards;
 
-  /// 显示在画布上的连线。
+  /// 显示在画布上的连线，按建立时间排列，也就是从下到上画的顺序。
   final List<Link> links;
 
   /// 从这一天顺延走的卡片留下的历史记录，按顺延时间排列。

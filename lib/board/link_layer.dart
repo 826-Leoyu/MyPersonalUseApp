@@ -31,7 +31,7 @@ class LinkLayer extends StatefulWidget {
   /// 卡片 ID → 卡片现在在画布上占的矩形，包括拖动、调整大小时的临时位置和大小。
   final Map<String, CardBox> boxes;
 
-  /// 选中的连线，画粗一点、用强调色。点击连线由后续任务接上，现在总是 null。
+  /// 选中的连线，画粗一点、用强调色。
   final String? selectedLinkId;
 
   @override
@@ -50,14 +50,7 @@ class _LinkLayerState extends State<LinkLayer> with TickerProviderStateMixin {
   final _fading = <String, ({PaintedLink last, AnimationController fade})>{};
 
   /// 两端卡片都在画布上的连线，以及它们的曲线。
-  Map<String, LinkCurve> _curves() => {
-    for (final link in widget.links)
-      if ((widget.boxes[link.fromCardId], widget.boxes[link.toCardId]) case (
-        final from?,
-        final to?,
-      ))
-        link.id: linkCurve(from, to),
-  };
+  Map<String, LinkCurve> _curves() => linkCurves(widget.links, widget.boxes);
 
   @override
   void initState() {

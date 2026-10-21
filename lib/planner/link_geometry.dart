@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import 'link.dart';
+
 /// 画布上的一个点（画布坐标）。
 typedef CanvasPoint = ({double x, double y});
 
@@ -13,6 +15,20 @@ typedef LinkCurve = ({
   CanvasPoint control2,
   CanvasPoint end,
 });
+
+/// [links] 里两端卡片都在 [boxes] 里的连线，以及它们的曲线，按 [links] 的顺序，
+/// 也就是从下到上的绘制顺序。
+Map<String, LinkCurve> linkCurves(
+  List<Link> links,
+  Map<String, CardBox> boxes,
+) => {
+  for (final link in links)
+    if ((boxes[link.fromCardId], boxes[link.toCardId]) case (
+      final from?,
+      final to?,
+    ))
+      link.id: linkCurve(from, to),
+};
 
 /// 控制点偏移量的上限。
 const maxControlOffset = 120.0;
@@ -145,3 +161,25 @@ bool isNearLinkCurve(
   CanvasPoint point, {
   required double scale,
 }) => distanceToLinkCurve(curve, point) <= linkHitRadius / scale;
+
+/// 画布上的 [point] 点中的连线：判定范围（见 [isNearLinkCurve]）内离它最近的
+/// 那一条；一条也没有时返回 null。
+///
+/// [curves] 是连线 ID → 曲线，按从下到上的绘制顺序。一样近时取后画的那条，
+/// 也就是画在上面的那条。
+String? linkAt(
+  Map<String, LinkCurve> curves,
+  CanvasPoint point, {
+  required double scale,
+}) {
+  String? nearest;
+  var nearestDistance = linkHitRadius / scale;
+  for (final MapEntry(key: id, value: curve) in curves.entries) {
+    final d = distanceToLinkCurve(curve, point);
+    if (d <= nearestDistance) {
+      nearest = id;
+      nearestDistance = d;
+    }
+  }
+  return nearest;
+}

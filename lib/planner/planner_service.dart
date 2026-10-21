@@ -622,12 +622,19 @@ class PlannerService {
     // 连线显示规则：两端都是这一天画布上显示的卡片（同一天、未完成、不在回收站）。
     final cardIds = cardRows.map((c) => c.id);
     final linkRows =
-        await (_db.select(_db.links)..where(
-              (l) =>
-                  l.deletedAt.isNull() &
-                  l.fromCardId.isIn(cardIds) &
-                  l.toCardId.isIn(cardIds),
-            ))
+        await (_db.select(_db.links)
+              ..where(
+                (l) =>
+                    l.deletedAt.isNull() &
+                    l.fromCardId.isIn(cardIds) &
+                    l.toCardId.isIn(cardIds),
+              )
+              // 按建立时间排，也就是从下到上画的顺序；同一毫秒建的按 id 排，
+              // 保证顺序稳定。
+              ..orderBy([
+                (l) => OrderingTerm.asc(l.createdAt),
+                (l) => OrderingTerm.asc(l.id),
+              ]))
             .get();
     final recordRows =
         await (_db.select(_db.carryOverRecords)

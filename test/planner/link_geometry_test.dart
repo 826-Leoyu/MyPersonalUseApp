@@ -271,4 +271,44 @@ void main() {
       expect(isNearLinkCurve(curve, above(24.1), scale: 0.5), isFalse);
     });
   });
+
+  group('点中的连线：判定范围内离点击位置最近的那一条', () {
+    // 三条水平直线段，都从 x = 100 到 x = 300：y = 25、y = 45、y = 65。
+    LinkCurve horizontalAt(double y) => linkCurve(
+      (x: 0, y: y - 25, width: 100, height: 50),
+      (x: 300, y: y - 25, width: 100, height: 50),
+    );
+    final curves = {
+      'top': horizontalAt(25),
+      'middle': horizontalAt(45),
+      'bottom': horizontalAt(65),
+    };
+
+    test('判定范围内有几条时取最近的', () {
+      expect(linkAt(curves, (x: 200, y: 37), scale: 1), 'middle');
+      expect(linkAt(curves, (x: 200, y: 33), scale: 1), 'top');
+      expect(linkAt(curves, (x: 200, y: 58), scale: 1), 'bottom');
+    });
+
+    test('一条也不在判定范围内时没有点中', () {
+      expect(linkAt(curves, (x: 200, y: 78), scale: 1), isNull);
+      expect(linkAt(curves, (x: 330, y: 45), scale: 1), isNull);
+      expect(linkAt(const {}, (x: 200, y: 45), scale: 1), isNull);
+    });
+
+    test('判定范围按缩放比例换算：3 倍时画布上相距 4 算点中，5 不算', () {
+      expect(linkAt(curves, (x: 200, y: 69), scale: 3), 'bottom');
+      expect(linkAt(curves, (x: 200, y: 70), scale: 3), isNull);
+    });
+
+    test('一样近时（曲线重叠）取后画的那条，也就是画在上面的，结果稳定', () {
+      final overlapping = {
+        'below': curves['middle']!,
+        'above': curves['middle']!,
+      };
+      expect(linkAt(overlapping, (x: 200, y: 40), scale: 1), 'above');
+      final swapped = {'above': curves['middle']!, 'below': curves['middle']!};
+      expect(linkAt(swapped, (x: 200, y: 40), scale: 1), 'below');
+    });
+  });
 }
