@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:my_personal_use_app/app/planner_app.dart';
 import 'package:my_personal_use_app/app/providers.dart';
+import 'package:my_personal_use_app/board/board_canvas.dart';
 import 'package:my_personal_use_app/planner/day_board.dart';
 import 'package:my_personal_use_app/planner/day_key.dart';
 import 'package:my_personal_use_app/planner/planner_service.dart';
@@ -77,24 +78,73 @@ class BoardHarness {
     return result as T;
   }
 
+  /// 直接改数据库，把卡片挪到 [dayKey] 那一天。正常操作造不出两端不在同一天的
+  /// 连线，用它来模拟。
+  Future<void> moveCardToDay(
+    WidgetTester tester,
+    String cardId,
+    DayKey dayKey,
+  ) async {
+    await tester.runAsync(() async {
+      final database = _newConnection();
+      try {
+        await (database.update(database.taskCards)
+              ..where((c) => c.id.equals(cardId)))
+            .write(TaskCardsCompanion(dayKey: Value(dayKey.toString())));
+      } finally {
+        await database.close();
+      }
+    });
+  }
+
   /// 通过 service 读出某一天的画布内容，用来检查结果。
   Future<DayBoard> readBoard(WidgetTester tester, DayKey dayKey) =>
       seed(tester, (service) => service.watchDay(dayKey).first);
 
   /// 冷启动 App，等它打开存储并显示出来。
-  Future<void> launch(WidgetTester tester) async {
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          clockProvider.overrideWithValue(_clock),
-          plannerDatabaseFactoryProvider.overrideWithValue(_openDatabase),
-          if (displayedDay case final day?)
-            displayedDayProvider.overrideWithValue(day),
-        ],
-        child: const PlannerApp(),
-      ),
+  ///
+  /// [settleAnimations] 为 false 时，画布一出现就返回，不推进动画的时间。
+  Future<void> launch(
+    WidgetTester tester, {
+    bool settleAnimations = true,
+  }) async {
+    await tester.pumpWidget(_app());
+    if (settleAnimations) return settle(tester);
+    await pumpData(
+      tester,
+      rounds: 10,
+      until: () => find.byType(BoardCanvas).evaluate().isNotEmpty,
     );
-    await settle(tester);
+  }
+
+  /// App 运行中把画布切到 [day]，等那一天的画布内容显示出来，不推进动画的时间。
+  /// 日期栏做好之前用它来测切换日期。
+  Future<void> showDay(WidgetTester tester, DayKey day) async {
+    displayedDay = day;
+    await tester.pumpWidget(_app());
+    await pumpData(tester);
+  }
+
+  Widget _app() => ProviderScope(
+    overrides: [
+      clockProvider.overrideWithValue(_clock),
+      plannerDatabaseFactoryProvider.overrideWithValue(_openDatabase),
+      displayedDayProvider.overrideWithValue(displayedDay ?? today),
+    ],
+    child: const PlannerApp(),
+  );
+
+  /// 让数据库读写跑完、新的画布内容显示出来，不推进动画的时间。最多推
+  /// [rounds] 轮，[until] 成立时提前停下。
+  Future<void> pumpData(
+    WidgetTester tester, {
+    int rounds = 3,
+    bool Function()? until,
+  }) async {
+    for (var i = 0; i < rounds && !(until?.call() ?? false); i++) {
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pump();
+    }
   }
 
   /// 等待数据库读写和界面刷新都完成。drift 的查询是真正的异步 IO，

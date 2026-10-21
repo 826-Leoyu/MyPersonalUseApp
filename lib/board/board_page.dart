@@ -32,6 +32,8 @@ class BoardPage extends ConsumerWidget {
       ),
       body: switch (board) {
         AsyncData(:final value) => BoardCanvas(
+          // 换一天就换一个画布：拖动、动画这些临时状态不带到另一天。
+          key: ValueKey(day),
           board: value,
           // 过去的日期不能新建卡片。
           canCreateCards: day >= today,
