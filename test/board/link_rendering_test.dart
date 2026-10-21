@@ -260,10 +260,7 @@ void main() {
         final service = await container.read(plannerServiceProvider.future);
         return action(service);
       });
-      for (var i = 0; i < 3; i++) {
-        await tester.runAsync(() => Future<void>.delayed(Duration.zero));
-        await tester.pump();
-      }
+      await harness.pumpData(tester);
       return result as T;
     }
 

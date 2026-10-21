@@ -110,14 +110,11 @@ class BoardHarness {
   }) async {
     await tester.pumpWidget(_app());
     if (settleAnimations) return settle(tester);
-    for (
-      var i = 0;
-      i < 10 && find.byType(BoardCanvas).evaluate().isEmpty;
-      i++
-    ) {
-      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
-      await tester.pump();
-    }
+    await pumpData(
+      tester,
+      rounds: 10,
+      until: () => find.byType(BoardCanvas).evaluate().isNotEmpty,
+    );
   }
 
   /// App 运行中把画布切到 [day]，等那一天的画布内容显示出来，不推进动画的时间。
@@ -125,10 +122,7 @@ class BoardHarness {
   Future<void> showDay(WidgetTester tester, DayKey day) async {
     displayedDay = day;
     await tester.pumpWidget(_app());
-    for (var i = 0; i < 3; i++) {
-      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
-      await tester.pump();
-    }
+    await pumpData(tester);
   }
 
   Widget _app() => ProviderScope(
@@ -139,6 +133,19 @@ class BoardHarness {
     ],
     child: const PlannerApp(),
   );
+
+  /// 让数据库读写跑完、新的画布内容显示出来，不推进动画的时间。最多推
+  /// [rounds] 轮，[until] 成立时提前停下。
+  Future<void> pumpData(
+    WidgetTester tester, {
+    int rounds = 3,
+    bool Function()? until,
+  }) async {
+    for (var i = 0; i < rounds && !(until?.call() ?? false); i++) {
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pump();
+    }
+  }
 
   /// 等待数据库读写和界面刷新都完成。drift 的查询是真正的异步 IO，
   /// 要在 runAsync 里让它跑完，再推进界面。
