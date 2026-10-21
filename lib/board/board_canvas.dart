@@ -72,6 +72,9 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
   /// 卡片最远处之外再留出的空白，让画布内容区比卡片大一圈。
   static const _canvasPadding = 1000.0;
 
+  /// ✂️ 按钮的点击范围（屏幕上的逻辑像素）。
+  static const _scissorsHitSize = 44.0;
+
   /// Ctrl+滚轮缩放的灵敏度：滚动这么多逻辑像素，缩放比例变为 e 倍。
   /// 和 InteractiveViewer 自带的滚轮缩放默认值一样。
   static const _wheelZoomScrollExtent = 200.0;
@@ -80,7 +83,15 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
   Offset? _doubleTapPosition;
 
   /// 最近一次双击连线的位置（画布坐标）。
-  Offset _linkDoubleTapPosition = Offset.zero;
+  Offset? _linkDoubleTapPosition;
+
+  /// 按在连线上（不算盖在连线上的卡片）的位置（画布坐标）：[_downOnLink] 是
+  /// 这一次按下，[_lastDownOnLink]、[_previousDownOnLink] 是最近一次和上一次
+  /// 按下；没按在连线上时为 null。双击的第一下按在连线上、第二下偏出了判定
+  /// 范围时，外面的画布会认成双击空白处，靠它们认出来，改成点连线。
+  Offset? _downOnLink;
+  Offset? _lastDownOnLink;
+  Offset? _previousDownOnLink;
 
   /// 拖动卡片的状态机，和正在拖卡片的指针。
   late final _drag = CardDragMachine(
@@ -144,7 +155,19 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       ..multiply(_transform.value);
   }
 
+  /// 记下这一次按下是不是按在连线上。连线上的按下先到，画布上的后到。
+  void _onCanvasPointerDown(PointerDownEvent event) {
+    _previousDownOnLink = _lastDownOnLink;
+    _lastDownOnLink = _downOnLink;
+    _downOnLink = null;
+  }
+
   void _onDoubleTapBlank() {
+    // 第一下点在连线上：和双击连线一样，选中那条连线。
+    if (_previousDownOnLink case final onLink?) {
+      _onTapLink(onLink);
+      return;
+    }
     final position = _doubleTapPosition;
     if (position == null) return;
     _save(() => _selection.newCardAt(_transform.toScene(position)));
@@ -367,13 +390,18 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
   Future<void> _openLinkMenu(Offset position, Offset global) async {
     final linkId = _linkAt(position);
     if (linkId == null) return;
-    final remove = await showMenu<bool>(
+    final action = await showMenu<_LinkMenuAction>(
       context: context,
       position: _menuPosition(global),
-      items: const [PopupMenuItem(value: true, child: Text('断开连线'))],
+      items: const [
+        PopupMenuItem(value: _LinkMenuAction.remove, child: Text('断开连线')),
+      ],
     );
-    if (remove != true || !mounted) return;
-    await _save(() => _selection.removeLink(linkId));
+    if (action == null || !mounted) return;
+    switch (action) {
+      case _LinkMenuAction.remove:
+        await _save(() => _selection.removeLink(linkId));
+    }
   }
 
   /// 选中的连线中点上的 ✂️，盖在画布上面，不随缩放变大变小。
@@ -402,9 +430,6 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       },
     );
   }
-
-  /// ✂️ 按钮的点击范围（屏幕上的逻辑像素）。
-  static const _scissorsHitSize = 44.0;
 
   /// 保存拖动后的位置。保存好之前卡片停在新位置；保存失败时回到原处。
   Future<void> _moveCard(CardDrop drop) async {
@@ -522,6 +547,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     final height = cards.fold(0.0, (h, c) => math.max(h, c.y + c.height));
     final canvas = Listener(
       onPointerSignal: _onPointerSignal,
+      onPointerDown: _onCanvasPointerDown,
       // 卡片和编辑框在里层，点在它们上面时由它们处理，不算点空白处。
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -564,15 +590,23 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
                     // 当成双击空白处新建卡片。
                     onDoubleTapDown: (details) =>
                         _linkDoubleTapPosition = details.localPosition,
-                    onDoubleTap: () => _onTapLink(_linkDoubleTapPosition),
+                    onDoubleTap: () {
+                      if (_linkDoubleTapPosition case final position?) {
+                        _onTapLink(position);
+                      }
+                    },
                     // 右键和卡片一样不区分平台；手机上没有右键。
                     onSecondaryTapUp: (details) => _openLinkMenu(
                       details.localPosition,
                       details.globalPosition,
                     ),
-                    child: CustomPaint(
-                      painter: _LinkHitArea(
-                        (position) => _linkAt(position) != null,
+                    child: Listener(
+                      onPointerDown: (event) =>
+                          _downOnLink = event.localPosition,
+                      child: CustomPaint(
+                        painter: _LinkHitArea(
+                          (position) => _linkAt(position) != null,
+                        ),
                       ),
                     ),
                   ),
@@ -684,6 +718,9 @@ class _Scissors extends StatelessWidget {
 
 /// 卡片菜单里的操作。
 enum _CardMenuAction { recolor, edit, delete }
+
+/// 连线菜单里的操作。
+enum _LinkMenuAction { remove }
 
 class _CardView extends StatefulWidget {
   const _CardView({

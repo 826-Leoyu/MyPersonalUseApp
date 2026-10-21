@@ -188,7 +188,7 @@ void main() {
 
   for (final scale in [0.5, 1.0, 3.0]) {
     testWidgets('画布 $scale 倍：离连线屏幕上 13 像素不算点中，11 像素算；'
-        '✂️ 在中点，点击范围是屏幕上的 44 × 44', (tester) async {
+        '✂️ 在中点，图标 32、点击范围 44 × 44（屏幕上）', (tester) async {
       useLargeView(tester);
       final (a, _, linkId) = await seedPair(tester);
       await harness.launch(tester);
@@ -210,6 +210,11 @@ void main() {
       expect(scissors.center.dx, moreOrLessEquals(middle.dx));
       expect(scissors.center.dy, moreOrLessEquals(middle.dy));
       expect(scissors.size, const Size(44, 44));
+      final icon = find.descendant(
+        of: scissorsFinder,
+        matching: find.byType(DecoratedBox),
+      );
+      expect(tester.getRect(icon).size, const Size(32, 32));
 
       await harness.dispose(tester);
     });
@@ -273,6 +278,26 @@ void main() {
       (await harness.readBoard(tester, harness.today)).cards,
       hasLength(2),
     );
+
+    await harness.dispose(tester);
+  });
+
+  testWidgets('双击连线时第二下偏出了判定范围：仍然只选中连线，不新建卡片', (tester) async {
+    final (a, _, linkId) = await seedPair(tester);
+    await harness.launch(tester);
+
+    await tester.tapAt(onScreen(tester, a, const Offset(310, 110)));
+    await tester.pump(kDoubleTapMinTime);
+    await tester.tapAt(onScreen(tester, a, const Offset(310, 140)));
+    await tester.pump(kDoubleTapTimeout);
+    await harness.settle(tester);
+
+    expect(find.byType(TextField), findsNothing);
+    expect(
+      (await harness.readBoard(tester, harness.today)).cards,
+      hasLength(2),
+    );
+    expect(highlighted(tester), [linkId]);
 
     await harness.dispose(tester);
   });

@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import 'link.dart';
+
 /// 画布上的一个点（画布坐标）。
 typedef CanvasPoint = ({double x, double y});
 
@@ -13,6 +15,20 @@ typedef LinkCurve = ({
   CanvasPoint control2,
   CanvasPoint end,
 });
+
+/// [links] 里两端卡片都在 [boxes] 里的连线，以及它们的曲线，按 [links] 的顺序，
+/// 也就是从下到上的绘制顺序。
+Map<String, LinkCurve> linkCurves(
+  List<Link> links,
+  Map<String, CardBox> boxes,
+) => {
+  for (final link in links)
+    if ((boxes[link.fromCardId], boxes[link.toCardId]) case (
+      final from?,
+      final to?,
+    ))
+      link.id: linkCurve(from, to),
+};
 
 /// 控制点偏移量的上限。
 const maxControlOffset = 120.0;
