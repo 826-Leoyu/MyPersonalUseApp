@@ -178,6 +178,31 @@ void main() {
     expect(machine.state, isA<CardDragging>());
   });
 
+  test('armed 后贴着目标边缘慢慢移动：在目标矩形里面一直保持 armed，出了矩形才取消', () {
+    final machine = hovering()..tick(CardDragMachine.armDelay);
+    final right = target.x + target.width;
+
+    // 沿右边缘内侧 0.5 往下走，每步 1。
+    for (var y = target.y; y < target.y + target.height; y++) {
+      machine.move(
+        Offset(right - 0.5, y),
+        cards: cards,
+        now: const Duration(seconds: 1),
+      );
+      expect(machine.state, isA<CardArmed>(), reason: 'y = $y');
+    }
+
+    // 刚好出了右边缘（矩形不含右边）。
+    machine.move(
+      Offset(right, target.y + 40),
+      cards: cards,
+      now: const Duration(seconds: 1),
+    );
+    expect(machine.state, isNot(isA<CardArmed>()));
+    expect(machine.state, isNot(isA<CardHovering>()));
+    expect(machine.state, isA<CardDragging>());
+  });
+
   test('停在被拖卡片自己下面不算碰到卡片', () {
     final machine = pressed()
       ..move(press + const Offset(30, 40), cards: cards, now: Duration.zero);

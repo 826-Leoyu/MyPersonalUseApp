@@ -1,3 +1,6 @@
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -69,13 +72,10 @@ void main() {
     await harness.settle(tester);
   }
 
-  testWidgets('在另一张卡片上停满 400ms：目标放大、出现虚线预览；松手新建连线，被拖卡片回到原处（AC-13）', (
-    tester,
-  ) async {
+  testWidgets('在另一张卡片上停满 400ms：目标放大、出现虚线预览（AC-13）', (tester) async {
     final a = await seedCard(tester, title: 'A', x: 40);
     final b = await seedCard(tester, title: 'B', x: 400);
     await harness.launch(tester);
-    final before = tester.getRect(cardFinder(a));
 
     final gesture = await dragTo(tester, a, tester.getCenter(cardFinder(b)));
     await tester.pump(CardDragMachine.armDelay);
@@ -85,6 +85,18 @@ void main() {
     expect(find.byKey(BoardCanvas.linkPreviewKey), findsOneWidget);
     expect(find.byKey(BoardCanvas.unlinkPreviewKey), findsNothing);
 
+    await release(tester, gesture);
+    await harness.dispose(tester);
+  });
+
+  testWidgets('出现预览后松手：新建连线，被拖卡片回到原处，预览消失（AC-13）', (tester) async {
+    final a = await seedCard(tester, title: 'A', x: 40);
+    final b = await seedCard(tester, title: 'B', x: 400);
+    await harness.launch(tester);
+    final before = tester.getRect(cardFinder(a));
+
+    final gesture = await dragTo(tester, a, tester.getCenter(cardFinder(b)));
+    await tester.pump(CardDragMachine.armDelay);
     await release(tester, gesture);
 
     final links = await savedLinks(tester);
@@ -253,5 +265,148 @@ void main() {
     expect(tester.getRect(cardFinder(a)), before);
 
     await harness.dispose(tester);
+  });
+
+  testWidgets('断开保存失败时提示「保存失败，请重试」，连线还在，被拖卡片仍然回到原处', (tester) async {
+    final a = await seedCard(tester, title: 'A', x: 40);
+    final b = await seedCard(tester, title: 'B', x: 400);
+    await harness.seed(tester, (service) => service.toggleLink(a.id, b.id));
+    await harness.launch(tester);
+    final before = tester.getRect(cardFinder(a));
+    harness.failWrites = true;
+
+    final gesture = await dragTo(tester, a, tester.getCenter(cardFinder(b)));
+    await tester.pump(CardDragMachine.armDelay);
+    expect(find.byKey(BoardCanvas.unlinkPreviewKey), findsOneWidget);
+    await release(tester, gesture);
+
+    expect(find.text('保存失败，请重试'), findsOneWidget);
+    final links = await savedLinks(tester);
+    expect(links.map((l) => (l.fromCardId, l.toCardId)), [(a.id, b.id)]);
+    expect(tester.getRect(cardFinder(a)), before);
+
+    await harness.dispose(tester);
+  });
+
+  /// 画布放大或缩小到 [scale] 倍，以屏幕上的 [focal] 为中心。
+  Future<void> zoomTo(WidgetTester tester, double scale, Offset focal) async {
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    final mouse = TestPointer(1, PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(mouse.hover(focal));
+    // Ctrl+滚轮每滚动 200 逻辑像素缩放 e 倍，见 BoardCanvas。
+    await tester.sendEventToBinding(
+      mouse.scroll(Offset(0, -200 * math.log(scale))),
+    );
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await harness.settle(tester);
+  }
+
+  /// 屏幕大一些，画布放大到 3 倍时两张卡片都还在屏幕里。
+  void useLargeView(WidgetTester tester) {
+    tester.view
+      ..physicalSize = const Size(2400, 1200)
+      ..devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+  }
+
+  for (final scale in [0.5, 1.0, 3.0]) {
+    testWidgets('画布 $scale 倍：armed 后贴着目标边缘内侧慢慢移动，预览一直在，不闪烁', (tester) async {
+      useLargeView(tester);
+      final a = await seedCard(tester, title: 'A', x: 40);
+      final b = await seedCard(tester, title: 'B', x: 300);
+      await harness.launch(tester);
+      await zoomTo(tester, scale, tester.getCenter(cardFinder(a)));
+      final target = tester.getRect(cardFinder(b));
+      expect(target.width, moreOrLessEquals(TaskCard.defaultWidth * scale));
+
+      final gesture = await dragTo(tester, a, target.center);
+      await tester.pump(CardDragMachine.armDelay);
+      expect(cardScale(tester, b), 1.05);
+
+      // 先移到右边缘内侧 1 像素，再沿着右边缘、下边缘内侧每步 1 像素慢慢走。
+      final steps = [
+        for (var y = target.center.dy; y < target.bottom - 1; y++)
+          Offset(target.right - 1, y),
+        for (var x = target.right - 1; x > target.left; x--)
+          Offset(x, target.bottom - 1),
+      ];
+      for (final point in steps) {
+        await gesture.moveTo(point);
+        await tester.pump(const Duration(milliseconds: 16));
+        expect(
+          find.byKey(BoardCanvas.linkPreviewKey),
+          findsOneWidget,
+          reason: '指针在 $point',
+        );
+      }
+
+      await release(tester, gesture);
+      expect(await savedLinks(tester), hasLength(1));
+
+      await harness.dispose(tester);
+    });
+
+    testWidgets('画布 $scale 倍：目标放大 1.05 倍多出来的一圈不算碰到目标，预览取消', (tester) async {
+      useLargeView(tester);
+      final a = await seedCard(tester, title: 'A', x: 40);
+      final b = await seedCard(tester, title: 'B', x: 300);
+      await harness.launch(tester);
+      await zoomTo(tester, scale, tester.getCenter(cardFinder(a)));
+      final target = tester.getRect(cardFinder(b));
+
+      final gesture = await dragTo(tester, a, target.center);
+      await tester.pump(CardDragMachine.armDelay);
+      expect(find.byKey(BoardCanvas.linkPreviewKey), findsOneWidget);
+
+      // 放大后的卡片右边缘在 target.right + 宽度 × 0.025，这里在它里面、
+      // 在原来的矩形外面。
+      await gesture.moveTo(Offset(target.right + 1, target.center.dy));
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(find.byKey(BoardCanvas.linkPreviewKey), findsNothing);
+
+      await release(tester, gesture);
+      expect(await savedLinks(tester), isEmpty);
+
+      await harness.dispose(tester);
+    });
+  }
+
+  testWidgets('Android 上连线保存成功才振动，保存失败不振动', (tester) async {
+    final vibrations = <Object?>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'HapticFeedback.vibrate') {
+          vibrations.add(call.arguments);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    final a = await seedCard(tester, title: 'A', x: 40);
+    final b = await seedCard(tester, title: 'B', x: 400);
+    final c = await seedCard(tester, title: 'C', x: 40, y: 300);
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    await harness.launch(tester);
+
+    var gesture = await dragTo(tester, a, tester.getCenter(cardFinder(b)));
+    await tester.pump(CardDragMachine.armDelay);
+    await release(tester, gesture);
+    expect(vibrations, ['HapticFeedbackType.lightImpact']);
+
+    harness.failWrites = true;
+    gesture = await dragTo(tester, c, tester.getCenter(cardFinder(b)));
+    await tester.pump(CardDragMachine.armDelay);
+    await release(tester, gesture);
+    expect(find.text('保存失败，请重试'), findsOneWidget);
+    expect(vibrations, hasLength(1));
+
+    await harness.dispose(tester);
+    debugDefaultTargetPlatformOverride = null;
   });
 }
