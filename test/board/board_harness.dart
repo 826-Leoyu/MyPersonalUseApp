@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:my_personal_use_app/app/planner_app.dart';
 import 'package:my_personal_use_app/app/providers.dart';
+import 'package:my_personal_use_app/board/board_canvas.dart';
 import 'package:my_personal_use_app/planner/day_board.dart';
 import 'package:my_personal_use_app/planner/day_key.dart';
 import 'package:my_personal_use_app/planner/planner_service.dart';
@@ -101,20 +102,43 @@ class BoardHarness {
       seed(tester, (service) => service.watchDay(dayKey).first);
 
   /// 冷启动 App，等它打开存储并显示出来。
-  Future<void> launch(WidgetTester tester) async {
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          clockProvider.overrideWithValue(_clock),
-          plannerDatabaseFactoryProvider.overrideWithValue(_openDatabase),
-          if (displayedDay case final day?)
-            displayedDayProvider.overrideWithValue(day),
-        ],
-        child: const PlannerApp(),
-      ),
-    );
-    await settle(tester);
+  ///
+  /// [settleAnimations] 为 false 时，画布一出现就返回，不推进动画的时间。
+  Future<void> launch(
+    WidgetTester tester, {
+    bool settleAnimations = true,
+  }) async {
+    await tester.pumpWidget(_app());
+    if (settleAnimations) return settle(tester);
+    for (
+      var i = 0;
+      i < 10 && find.byType(BoardCanvas).evaluate().isEmpty;
+      i++
+    ) {
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pump();
+    }
   }
+
+  /// App 运行中把画布切到 [day]，等那一天的画布内容显示出来，不推进动画的时间。
+  /// 日期栏做好之前用它来测切换日期。
+  Future<void> showDay(WidgetTester tester, DayKey day) async {
+    displayedDay = day;
+    await tester.pumpWidget(_app());
+    for (var i = 0; i < 3; i++) {
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pump();
+    }
+  }
+
+  Widget _app() => ProviderScope(
+    overrides: [
+      clockProvider.overrideWithValue(_clock),
+      plannerDatabaseFactoryProvider.overrideWithValue(_openDatabase),
+      displayedDayProvider.overrideWithValue(displayedDay ?? today),
+    ],
+    child: const PlannerApp(),
+  );
 
   /// 等待数据库读写和界面刷新都完成。drift 的查询是真正的异步 IO，
   /// 要在 runAsync 里让它跑完，再推进界面。
