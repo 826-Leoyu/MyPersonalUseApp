@@ -145,3 +145,25 @@ bool isNearLinkCurve(
   CanvasPoint point, {
   required double scale,
 }) => distanceToLinkCurve(curve, point) <= linkHitRadius / scale;
+
+/// 画布上的 [point] 点中的连线：判定范围（见 [isNearLinkCurve]）内离它最近的
+/// 那一条；一条也没有时返回 null。
+///
+/// [curves] 是连线 ID → 曲线，按从下到上的绘制顺序。一样近时取后画的那条，
+/// 也就是画在上面的那条。
+String? linkAt(
+  Map<String, LinkCurve> curves,
+  CanvasPoint point, {
+  required double scale,
+}) {
+  String? nearest;
+  var nearestDistance = linkHitRadius / scale;
+  for (final MapEntry(key: id, value: curve) in curves.entries) {
+    final d = distanceToLinkCurve(curve, point);
+    if (d <= nearestDistance) {
+      nearest = id;
+      nearestDistance = d;
+    }
+  }
+  return nearest;
+}
