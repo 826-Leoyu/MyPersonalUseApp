@@ -70,7 +70,8 @@ class _LinkLayerState extends State<LinkLayer> with TickerProviderStateMixin {
   void didUpdateWidget(LinkLayer oldWidget) {
     super.didUpdateWidget(oldWidget);
     final curves = _curves();
-    // 画布内容重复推送、或者只是卡片动了：连线没有增减，不播动画。
+    // 只有增减的连线播动画。画布内容重复推送、或者只是卡片动了，连线没有增减，
+    // 不播动画。
     for (final id in _shown.keys.where((id) => !curves.containsKey(id))) {
       _startFading(id, _painted(id, _shown[id]!));
     }
@@ -81,7 +82,10 @@ class _LinkLayerState extends State<LinkLayer> with TickerProviderStateMixin {
   }
 
   /// 一个跑完就自己去掉的动画，每一帧都重画连线层。
-  AnimationController _animation(Duration duration, VoidCallback onDone) {
+  AnimationController _selfDisposingAnimation(
+    Duration duration,
+    VoidCallback onDone,
+  ) {
     final controller = AnimationController(vsync: this, duration: duration);
     controller
       ..addListener(() => setState(() {}))
@@ -96,7 +100,7 @@ class _LinkLayerState extends State<LinkLayer> with TickerProviderStateMixin {
   void _startDrawing(String id) {
     // 淡出到一半又回来了（比如撤销断开）：不再淡出，重新画出来。
     _fading.remove(id)?.fade.dispose();
-    final controller = _animation(
+    final controller = _selfDisposingAnimation(
       LinkLayer.drawDuration,
       () => _drawing.remove(id),
     );
@@ -107,7 +111,7 @@ class _LinkLayerState extends State<LinkLayer> with TickerProviderStateMixin {
   void _startFading(String id, PaintedLink last) {
     // 画到一半就不再显示了：停在画到的地方淡出。
     _drawing.remove(id)?.dispose();
-    final controller = _animation(
+    final controller = _selfDisposingAnimation(
       LinkLayer.fadeDuration,
       () => _fading.remove(id),
     );
@@ -143,13 +147,7 @@ class _LinkLayerState extends State<LinkLayer> with TickerProviderStateMixin {
       key: LinkLayer.paintKey,
       painter: LinkPainter([
         for (final (:last, :fade) in _fading.values)
-          PaintedLink(
-            id: last.id,
-            curve: last.curve,
-            progress: last.progress,
-            opacity: 1 - fade.value,
-            selected: last.selected,
-          ),
+          last.withOpacity(1 - fade.value),
         for (final MapEntry(key: id, value: curve) in _shown.entries)
           _painted(id, curve),
       ]),
@@ -177,6 +175,15 @@ class PaintedLink {
   final double opacity;
 
   final bool selected;
+
+  /// 同一条线，换成 [opacity] 的透明度。
+  PaintedLink withOpacity(double opacity) => PaintedLink(
+    id: id,
+    curve: curve,
+    progress: progress,
+    opacity: opacity,
+    selected: selected,
+  );
 }
 
 /// 画连线：三次贝塞尔曲线，终点（画到哪里就在哪里）画一个细箭头。
@@ -197,16 +204,16 @@ class LinkPainter extends CustomPainter {
   }
 
   void _paintLink(Canvas canvas, PaintedLink link) {
-    final c = link.curve;
+    final curve = link.curve;
     final full = Path()
-      ..moveTo(c.start.x, c.start.y)
+      ..moveTo(curve.start.x, curve.start.y)
       ..cubicTo(
-        c.control1.x,
-        c.control1.y,
-        c.control2.x,
-        c.control2.y,
-        c.end.x,
-        c.end.y,
+        curve.control1.x,
+        curve.control1.y,
+        curve.control2.x,
+        curve.control2.y,
+        curve.end.x,
+        curve.end.y,
       );
     final metric = full.computeMetrics().firstOrNull;
     // 两张卡片重叠时曲线缩成一个点，没有可画的。
@@ -234,11 +241,13 @@ class LinkPainter extends CustomPainter {
       return tip.position + rotated * _arrowLength;
     }
 
+    final left = wing(_arrowAngle);
+    final right = wing(-_arrowAngle);
     canvas.drawPath(
       Path()
-        ..moveTo(wing(_arrowAngle).dx, wing(_arrowAngle).dy)
+        ..moveTo(left.dx, left.dy)
         ..lineTo(tip.position.dx, tip.position.dy)
-        ..lineTo(wing(-_arrowAngle).dx, wing(-_arrowAngle).dy),
+        ..lineTo(right.dx, right.dy),
       paint,
     );
   }
