@@ -79,6 +79,26 @@ class BoardSelectionController extends Notifier<BoardSelection> {
     }
   }
 
+  /// 卡片菜单里的「编辑」：先保存正在编辑的其他卡片，再编辑这张。
+  ///
+  /// 保存失败时抛出 PlannerException，仍然停在原来的编辑状态，内容不丢。
+  Future<void> editCard(TaskCard card) async {
+    await _finishEditing();
+    state = EditingCard(card);
+  }
+
+  /// 卡片菜单里的「删除」：把卡片移到回收站；它是选中的就取消选中。
+  ///
+  /// 删除失败时抛出 PlannerException，选中状态不变。
+  Future<void> deleteCard(String cardId) async {
+    final service = await ref.read(plannerServiceProvider.future);
+    await service.deleteCard(cardId);
+    if (state case CardSelected(cardId: final selected)
+        when selected == cardId) {
+      state = const NothingSelected();
+    }
+  }
+
   /// 单击空白处：退出编辑并保存，取消选中。
   ///
   /// 保存失败时抛出 PlannerException，仍然停在编辑状态，内容不丢。

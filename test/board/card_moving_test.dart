@@ -259,7 +259,7 @@ void main() {
     });
   });
 
-  testWidgets('按住卡片 500ms 不动是长按：之后移动不拖卡片、不平移画布，松手也不选中', (tester) async {
+  testWidgets('按住卡片 500ms 不动是长按：弹出菜单，之后移动不拖卡片、不平移画布，松手也不选中', (tester) async {
     final card = await seedCard(tester);
     await harness.launch(tester);
     final before = tester.getRect(cardFinder(card));
@@ -274,6 +274,7 @@ void main() {
     await tester.pump(kDoubleTapTimeout);
     await harness.settle(tester);
 
+    expect(find.text('改颜色'), findsOneWidget);
     expect(tester.getRect(cardFinder(card)), before);
     expect(handleFinder(card), findsNothing);
     final saved = await savedCard(tester, card);
