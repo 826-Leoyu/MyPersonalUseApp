@@ -293,22 +293,6 @@ void main() {
 
       await harness.dispose(tester);
     });
-
-    testWidgets('双击卡片不选中也不进入编辑（双击完成由 #20 接上）', (tester) async {
-      final card = await seedCard(tester);
-      await harness.launch(tester);
-
-      await tester.tap(cardFinder(card));
-      await tester.pump(kDoubleTapMinTime);
-      await tester.tap(cardFinder(card));
-      await tester.pump(kDoubleTapTimeout);
-      await harness.settle(tester);
-
-      expect(handleFinder(card), findsNothing);
-      expect(find.byType(TextField), findsNothing);
-
-      await harness.dispose(tester);
-    });
   });
 
   group('卡片内容', () {

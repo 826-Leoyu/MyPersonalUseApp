@@ -52,6 +52,12 @@ class BoardCanvas extends ConsumerStatefulWidget {
   /// 连线或断开后，被拖的卡片弹回起点的时长。
   static const bounceDuration = Duration(milliseconds: 250);
 
+  /// 完成时卡片打勾消失的时长。
+  static const completeDuration = Duration(milliseconds: 200);
+
+  /// 正在完成的卡片上的 ✓ 的 key。
+  static const completeCheckKey = ValueKey('complete-check');
+
   /// 缩放比例的下限和上限（暂定）。
   static const minScale = 0.5;
   static const maxScale = 3.0;
@@ -85,13 +91,13 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
   /// 最近一次双击连线的位置（画布坐标）。
   Offset? _linkDoubleTapPosition;
 
-  /// 按在连线上（不算盖在连线上的卡片）的位置（画布坐标）：[_downOnLink] 是
-  /// 这一次按下，[_lastDownOnLink]、[_previousDownOnLink] 是最近一次和上一次
-  /// 按下；没按在连线上时为 null。双击的第一下按在连线上、第二下偏出了判定
-  /// 范围时，外面的画布会认成双击空白处，靠它们认出来，改成点连线。
-  Offset? _downOnLink;
-  Offset? _lastDownOnLink;
-  Offset? _previousDownOnLink;
+  /// 按下时落在了连线还是卡片上：[_downOn] 是这一次按下，[_lastDownOn]、
+  /// [_previousDownOn] 是最近一次和上一次按下；都没落在上面时为 null。双击的
+  /// 第一下按在连线或卡片上、第二下偏出去落在空白处时，外面的画布会认成双击
+  /// 空白处，靠它们认出来，改成双击那条连线或那张卡片。
+  _DownTarget? _downOn;
+  _DownTarget? _lastDownOn;
+  _DownTarget? _previousDownOn;
 
   /// 拖动卡片的状态机，和正在拖卡片的指针。
   late final _drag = CardDragMachine(
@@ -125,6 +131,10 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
   /// 松手后正在保存的新位置；保存好的位置从数据库回来后清掉。
   CardDrop? _dropping;
 
+  /// 正在完成或删除、从画布上退场的卡片。保存失败时清掉，卡片回到原处；
+  /// 保存成功后等卡片从数据库的画布内容里消失、退场动画也结束了再清掉。
+  final _leaving = <String, _Leaving>{};
+
   /// 正在拖手柄、或者刚拖完还没保存好的卡片的临时大小；保存好的大小从数据库
   /// 回来后清掉。连线也跟着这个大小。
   final _resizing = <String, Size>{};
@@ -155,18 +165,31 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       ..multiply(_transform.value);
   }
 
-  /// 记下这一次按下是不是按在连线上。连线上的按下先到，画布上的后到。
+  /// 记下这一次按下落在了什么上。连线、卡片上的按下先到，画布上的后到。
   void _onCanvasPointerDown(PointerDownEvent event) {
-    _previousDownOnLink = _lastDownOnLink;
-    _lastDownOnLink = _downOnLink;
-    _downOnLink = null;
+    _previousDownOn = _lastDownOn;
+    _lastDownOn = _downOn;
+    _downOn = null;
   }
 
   void _onDoubleTapBlank() {
-    // 第一下点在连线上：和双击连线一样，选中那条连线。
-    if (_previousDownOnLink case final onLink?) {
-      _onTapLink(onLink);
-      return;
+    switch (_previousDownOn) {
+      // 第一下点在连线上：和双击连线一样，选中那条连线。
+      case _DownOnLink(:final position):
+        _onTapLink(position);
+        return;
+      // 第一下点在卡片上：和双击卡片一样，完成它；正在编辑的卡片什么都不做。
+      case _DownOnCard(:final cardId):
+        if (ref.read(boardSelectionProvider)
+            case EditingCard(cardId: final editing) when editing == cardId) {
+          return;
+        }
+        if (widget.board.cards.where((c) => c.id == cardId).firstOrNull
+            case final card?) {
+          _completeCard(card);
+        }
+        return;
+      case null:
     }
     final position = _doubleTapPosition;
     if (position == null) return;
@@ -277,7 +300,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
             _moveCard(drop);
           case final CardLinkToggled toggled:
             _toggleLink(toggled);
-          case null:
+          case CardDropped() || null:
             setState(() {});
         }
       case PointerCancelEvent() when event.pointer == _dragPointerId:
@@ -349,11 +372,45 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     };
   }
 
+  /// 画布上显示的卡片：去掉已经退场的，加上数据库里已经没有、退场动画还没
+  /// 播完的。
+  List<TaskCard> _shownCards() {
+    final cards = widget.board.cards;
+    final ids = {for (final c in cards) c.id};
+    return [
+      for (final card in cards)
+        if (!(_leaving[card.id]?.gone ?? false)) card,
+      for (final leaving in _leaving.values)
+        if (!leaving.gone && !ids.contains(leaving.card.id)) leaving.card,
+    ];
+  }
+
+  /// 完成卡片：先打勾消失，同时在后台保存。保存失败时卡片回到原处。
+  /// 卡片已经在退场时什么都不做，不会重复保存。
+  Future<void> _completeCard(TaskCard card) async {
+    if (_leaving.containsKey(card.id)) return;
+    setState(() => _leaving[card.id] = _Leaving(card));
+    final saved = await _save(() => _selection.completeCard(card.id));
+    if (!saved && mounted) setState(() => _leaving.remove(card.id));
+  }
+
+  /// 卡片的退场动画播完了：不再显示它。
+  void _onLeft(String cardId) {
+    final leaving = _leaving[cardId];
+    if (leaving == null) return;
+    setState(() {
+      leaving.gone = true;
+      if (!widget.board.cards.any((c) => c.id == cardId)) {
+        _leaving.remove(cardId);
+      }
+    });
+  }
+
   /// 卡片现在在画布上占的矩形，算上临时的位置和大小，按从下到上的顺序。
   /// 卡片、连线和碰撞判断都按它来。
   Map<String, CardBox> _cardBoxes() {
     final lifted = _liftedPositions();
-    final cards = widget.board.cards;
+    final cards = _shownCards();
     return {
       for (final card in [
         ...cards.where((c) => !lifted.containsKey(c.id)),
@@ -450,6 +507,10 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     super.didUpdateWidget(oldWidget);
     final cards = {for (final c in widget.board.cards) c.id: c};
     final oldCards = {for (final c in oldWidget.board.cards) c.id: c};
+    // 退场的卡片已经从数据库的画布内容里消失、动画也播完了。
+    _leaving.removeWhere(
+      (cardId, leaving) => leaving.gone && !cards.containsKey(cardId),
+    );
     // 保存好的位置从数据库回来了，不再需要临时的位置。
     if (_dropping case (:final cardId, :final position)) {
       final card = cards[cardId];
@@ -529,10 +590,11 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
   Widget build(BuildContext context) {
     final cards = widget.board.cards;
     final selection = ref.watch(boardSelectionProvider);
+    final shown = _shownCards();
     // 正在拖动、刚松手还在保存、或者正在弹回的卡片显示在临时位置，画在所有
     // 卡片上面。
     final boxes = _cardBoxes();
-    final cardsById = {for (final c in cards) c.id: c};
+    final cardsById = {for (final c in shown) c.id: c};
     final ordered = [for (final id in boxes.keys) cardsById[id]!];
     final armed = switch (_drag.state) {
       final CardArmed armed => armed,
@@ -602,7 +664,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
                     ),
                     child: Listener(
                       onPointerDown: (event) =>
-                          _downOnLink = event.localPosition,
+                          _downOn = _DownOnLink(event.localPosition),
                       child: CustomPaint(
                         painter: _LinkHitArea(
                           (position) => _linkAt(position) != null,
@@ -616,6 +678,8 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
                     key: ValueKey(card.id),
                     card: card,
                     armedTarget: card.id == armed?.targetId,
+                    completing: _leaving.containsKey(card.id),
+                    onCompleted: () => _onLeft(card.id),
                     selected:
                         selection is CardSelected &&
                         selection.cardId == card.id,
@@ -625,6 +689,8 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
                         : null,
                     box: boxes[card.id]!,
                     onTap: () => _save(() => _selection.tapCard(card)),
+                    onDoubleTap: () => _completeCard(card),
+                    onPointerDown: () => _downOn = _DownOnCard(card.id),
                     onDragPointer: (event) => _onCardPointer(card, event),
                     onDragCancel: _onCardDragCancel,
                     onMenu: (global) => _openCardMenu(card, global),
@@ -716,6 +782,25 @@ class _Scissors extends StatelessWidget {
   );
 }
 
+/// 按下时落在了什么上，见 [_BoardCanvasState._downOn]。
+sealed class _DownTarget {
+  const _DownTarget();
+}
+
+/// 按在连线上（不算盖在连线上的卡片），[position] 是画布坐标。
+final class _DownOnLink extends _DownTarget {
+  const _DownOnLink(this.position);
+
+  final Offset position;
+}
+
+/// 按在卡片上。
+final class _DownOnCard extends _DownTarget {
+  const _DownOnCard(this.cardId);
+
+  final String cardId;
+}
+
 /// 卡片菜单里的操作。
 enum _CardMenuAction { recolor, edit, delete }
 
@@ -727,10 +812,14 @@ class _CardView extends StatefulWidget {
     super.key,
     required this.card,
     required this.armedTarget,
+    required this.completing,
+    required this.onCompleted,
     required this.selected,
     required this.editing,
     required this.box,
     required this.onTap,
+    required this.onDoubleTap,
+    required this.onPointerDown,
     required this.onDragPointer,
     required this.onDragCancel,
     required this.onMenu,
@@ -745,6 +834,10 @@ class _CardView extends StatefulWidget {
   /// 拖着另一张卡片停在这张上面、松手就会连线或断开：放大并发光。
   final bool armedTarget;
 
+  /// 正在完成：打勾消失，不再响应操作。播完时调 [onCompleted]。
+  final bool completing;
+  final VoidCallback onCompleted;
+
   final bool selected;
 
   /// 正在编辑这张卡片时不为 null，卡片上显示编辑框。
@@ -754,6 +847,12 @@ class _CardView extends StatefulWidget {
   final CardBox box;
 
   final VoidCallback onTap;
+
+  /// 双击卡片：完成它。正在编辑的卡片不响应。
+  final VoidCallback onDoubleTap;
+
+  /// 指针按在卡片上（包括正在编辑的卡片），手柄除外。
+  final VoidCallback onPointerDown;
 
   /// 按在卡片上的指针事件，交给画布的拖动状态机。
   final void Function(PointerEvent event) onDragPointer;
@@ -803,15 +902,8 @@ class _CardViewState extends State<_CardView> {
 
   @override
   Widget build(BuildContext context) {
-    final card = widget.card;
-    final editing = widget.editing;
-    // 正在编辑的卡片不能拖。
-    final onDragPointer = editing == null ? widget.onDragPointer : null;
-    // 长按（Windows 上也可以右键）弹出菜单。正在编辑的卡片不弹，
-    // 在编辑框里长按、右键是选文字和文字菜单。
-    final onMenu = editing == null ? widget.onMenu : null;
     return Positioned(
-      key: BoardCanvas.cardKey(card.id),
+      key: BoardCanvas.cardKey(widget.card.id),
       left: widget.box.x,
       top: widget.box.y,
       width: widget.box.width,
@@ -819,63 +911,128 @@ class _CardViewState extends State<_CardView> {
       child: AnimatedScale(
         scale: widget.armedTarget ? 1.05 : 1,
         duration: const Duration(milliseconds: 120),
-        child: GestureDetector(
-          onTap: widget.onTap,
-          // 双击卡片是「完成」，由 #20 接上。现在就注册双击，单击从一开始
-          // 就和最终版本一样，等双击判定时间过了才生效。
-          onDoubleTap: () {},
-          onLongPressStart: onMenu == null
-              ? null
-              : (details) => onMenu(details.globalPosition),
-          onSecondaryTapUp: onMenu == null
-              ? null
-              : (details) => onMenu(details.globalPosition),
-          // 拖动由拖动状态机处理，这里只用来抢下手势，画布不跟着平移。
-          // 正在编辑的卡片不能拖，在编辑框里拖动是选文字。
-          onPanStart: editing == null ? (_) {} : null,
-          onPanCancel: editing == null ? widget.onDragCancel : null,
-          child: Stack(
-            children: [
-              Positioned.fill(
-                // 手柄盖在卡片上面，按在手柄上不会走到这里。
-                child: Listener(
-                  onPointerDown: onDragPointer,
-                  onPointerMove: onDragPointer,
-                  onPointerUp: onDragPointer,
-                  onPointerCancel: onDragPointer,
-                  child: _CardFrame(
-                    colorArgb: card.colorArgb,
-                    glow: widget.armedTarget,
-                    builder: (textColor) => switch (editing) {
-                      final editing? => _CardEditor(
-                        editing: editing,
-                        textColor: textColor,
-                      ),
-                      null => _CardContent(card: card, textColor: textColor),
-                    },
+        child: widget.completing
+            ? _CompletingCard(onEnd: widget.onCompleted, child: _card())
+            : _card(),
+      ),
+    );
+  }
+
+  /// 卡片本身：手势、底色和内容，选中时右下角有手柄。
+  Widget _card() {
+    final card = widget.card;
+    final editing = widget.editing;
+    // 正在编辑的卡片不能拖。
+    final onDragPointer = editing == null ? widget.onDragPointer : null;
+    // 长按（Windows 上也可以右键）弹出菜单。正在编辑的卡片不弹，
+    // 在编辑框里长按、右键是选文字和文字菜单。
+    final onMenu = editing == null ? widget.onMenu : null;
+    return GestureDetector(
+      onTap: widget.onTap,
+      // 双击完成。正在编辑的卡片也接住双击（什么都不做），外面的画布才
+      // 不会当成双击空白处新建卡片。
+      onDoubleTap: editing == null ? widget.onDoubleTap : () {},
+      onLongPressStart: onMenu == null
+          ? null
+          : (details) => onMenu(details.globalPosition),
+      onSecondaryTapUp: onMenu == null
+          ? null
+          : (details) => onMenu(details.globalPosition),
+      // 拖动由拖动状态机处理，这里只用来抢下手势，画布不跟着平移。
+      // 正在编辑的卡片不能拖，在编辑框里拖动是选文字。
+      onPanStart: editing == null ? (_) {} : null,
+      onPanCancel: editing == null ? widget.onDragCancel : null,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            // 手柄盖在卡片上面，按在手柄上不会走到这里。
+            child: Listener(
+              onPointerDown: (event) {
+                widget.onPointerDown();
+                onDragPointer?.call(event);
+              },
+              onPointerMove: onDragPointer,
+              onPointerUp: onDragPointer,
+              onPointerCancel: onDragPointer,
+              child: _CardFrame(
+                colorArgb: card.colorArgb,
+                glow: widget.armedTarget,
+                builder: (textColor) => switch (editing) {
+                  final editing? => _CardEditor(
+                    editing: editing,
+                    textColor: textColor,
                   ),
-                ),
+                  null => _CardContent(card: card, textColor: textColor),
+                },
               ),
-              if (widget.selected)
-                Positioned(
-                  right: 0,
-                  bottom: 0,
-                  // 拖手柄由手柄自己处理，画布不跟着平移。
-                  child: GestureDetector(
-                    key: BoardCanvas.resizeHandleKey(card.id),
-                    dragStartBehavior: DragStartBehavior.down,
-                    onPanStart: _onResizeStart,
-                    onPanUpdate: _onResizeUpdate,
-                    onPanEnd: (_) => widget.onResizeEnd(),
-                    child: const _ResizeHandle(),
-                  ),
-                ),
-            ],
+            ),
           ),
+          if (widget.selected)
+            Positioned(
+              right: 0,
+              bottom: 0,
+              // 拖手柄由手柄自己处理，画布不跟着平移。
+              child: GestureDetector(
+                key: BoardCanvas.resizeHandleKey(card.id),
+                dragStartBehavior: DragStartBehavior.down,
+                onPanStart: _onResizeStart,
+                onPanUpdate: _onResizeUpdate,
+                onPanEnd: (_) => widget.onResizeEnd(),
+                child: const _ResizeHandle(),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 正在完成的卡片：打上 ✓，缩小、淡出，播完时调 [onEnd]。不再响应操作。
+class _CompletingCard extends StatelessWidget {
+  const _CompletingCard({required this.onEnd, required this.child});
+
+  final VoidCallback onEnd;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: 1),
+        duration: BoardCanvas.completeDuration,
+        curve: Curves.easeIn,
+        onEnd: onEnd,
+        builder: (context, t, child) => Opacity(
+          opacity: 1 - t,
+          child: Transform.scale(scale: 1 - 0.2 * t, child: child),
+        ),
+        child: Stack(
+          children: [
+            Positioned.fill(child: child),
+            const Center(
+              child: Icon(
+                Icons.check_circle,
+                key: BoardCanvas.completeCheckKey,
+                size: 40,
+                color: PlannerTheme.accent,
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
+}
+
+/// 一张正在退场的卡片。
+class _Leaving {
+  _Leaving(this.card);
+
+  /// 开始退场时的卡片，数据库里已经没有它、动画还没播完时用它来画。
+  final TaskCard card;
+
+  /// 退场动画播完了，不再显示。
+  bool gone = false;
 }
 
 /// 卡片上显示的内容：标题自动换行，超出卡片高度时省略；下面是备注的

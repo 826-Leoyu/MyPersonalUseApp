@@ -5,8 +5,9 @@
 /// 长按由卡片上的 Flutter 长按手势判定，它胜出时拖动被取消
 /// （[CardDragMachine.cancel]），不经过这里。
 ///
-/// 碰撞只看画布上的卡片。底部投放区（#20）要优先于卡片碰撞，画布上的历史
-/// 记录（#21）不参与碰撞，由那两个任务接上。
+/// 碰撞只看画布上的卡片，底部投放区优先于卡片碰撞。投放区是屏幕上固定的
+/// 位置，由界面按屏幕坐标判断后传进来。画布上的历史记录（#21）不参与碰撞，
+/// 由那个任务接上。
 library;
 
 import 'dart:math' as math;
@@ -68,6 +69,22 @@ final class CardDragging extends CardDragState {
 
   /// 卡片左上角相对指针的位置，拖动中保持不变。
   final Offset grab;
+}
+
+/// 底部投放区：✅ 完成、🗑️ 回收站。
+enum DropZone { complete, trash }
+
+/// 拖动中指针在底部投放区里。
+final class CardOverZone extends CardDragging {
+  CardOverZone(CardDragging dragging, {required this.zone})
+    : super(
+        cardId: dragging.cardId,
+        origin: dragging.origin,
+        position: dragging.position,
+        grab: dragging.grab,
+      );
+
+  final DropZone zone;
 }
 
 /// 拖动中指针停在另一张卡片上，开始计时。
@@ -140,6 +157,22 @@ final class CardLinkToggled extends CardRelease {
   final Offset origin;
 }
 
+/// 在投放区 [zone] 里松手：完成或删除 [cardId]。[releasedAt] 是卡片松手时的
+/// 位置，[origin] 是拖动前的位置，保存失败时卡片回到那里。
+final class CardDropped extends CardRelease {
+  const CardDropped({
+    required this.cardId,
+    required this.zone,
+    required this.releasedAt,
+    required this.origin,
+  });
+
+  final String cardId;
+  final DropZone zone;
+  final Offset releasedAt;
+  final Offset origin;
+}
+
 /// 驱动拖动状态：输入指针的位置和时间，输出 [state]。
 class CardDragMachine {
   /// [isLinked] 判断两张卡片之间现在有没有连线（任一方向）。
@@ -179,11 +212,13 @@ class CardDragMachine {
   }
 
   /// 指针在 [now] 时移动到 [pointer]。[cards] 是画布上的卡片（卡片 ID → 现在
-  /// 占的矩形），按从下到上的顺序，用来判断指针停在哪张卡片上。
+  /// 占的矩形），按从下到上的顺序，用来判断指针停在哪张卡片上。[zone] 是
+  /// 指针所在的投放区，不在投放区里时为 null。
   void move(
     Offset pointer, {
     required Map<String, CardBox> cards,
     required Duration now,
+    DropZone? zone,
   }) {
     final dragging = switch (_state) {
       final CardPressed pressed
@@ -203,6 +238,10 @@ class CardDragMachine {
       _ => null,
     };
     if (dragging == null) return;
+    if (zone != null) {
+      _state = CardOverZone(dragging, zone: zone);
+      return;
+    }
     final targetId = _cardAt(pointer, cards, except: dragging.cardId);
     // 还在同一张卡片上：接着计时，或者保持 armed；换了卡片重新计时。
     _state = switch (_state) {
@@ -236,6 +275,12 @@ class CardDragMachine {
     final state = _state;
     _state = const CardDragIdle();
     return switch (state) {
+      CardOverZone() => CardDropped(
+        cardId: state.cardId,
+        zone: state.zone,
+        releasedAt: state.position,
+        origin: state.origin,
+      ),
       CardArmed() => CardLinkToggled(
         cardId: state.cardId,
         targetId: state.targetId,

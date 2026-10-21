@@ -114,6 +114,18 @@ class BoardSelectionController extends Notifier<BoardSelection> {
     }
   }
 
+  /// 完成卡片（双击，或拖进 ✅ 区）；它是选中的就取消选中。
+  ///
+  /// 完成失败时抛出 PlannerException，选中状态不变。
+  Future<void> completeCard(String cardId) async {
+    final service = await ref.read(plannerServiceProvider.future);
+    await service.completeCard(cardId);
+    if (state case CardSelected(cardId: final selected)
+        when selected == cardId) {
+      state = const NothingSelected();
+    }
+  }
+
   /// 断开连线（✂️ 或右键菜单）；它是选中的就取消选中。
   ///
   /// 断开失败时抛出 PlannerException，选中状态不变。
