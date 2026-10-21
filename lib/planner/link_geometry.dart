@@ -79,6 +79,9 @@ LinkCurve linkCurve(CardBox from, CardBox to) {
   );
 }
 
+/// 曲线的中点（参数 t = 0.5 处），✂️ 显示在这里。
+CanvasPoint linkCurveMidpoint(LinkCurve curve) => _pointAt(curve, 0.5);
+
 /// 曲线上参数为 [t]（0 到 1）的点。
 CanvasPoint _pointAt(LinkCurve curve, double t) {
   final u = 1 - t;
