@@ -186,6 +186,18 @@ class PaintedLink {
   );
 }
 
+/// 连线曲线的路径。
+Path _curvePath(LinkCurve curve) => Path()
+  ..moveTo(curve.start.x, curve.start.y)
+  ..cubicTo(
+    curve.control1.x,
+    curve.control1.y,
+    curve.control2.x,
+    curve.control2.y,
+    curve.end.x,
+    curve.end.y,
+  );
+
 /// 画连线：三次贝塞尔曲线，终点（画到哪里就在哪里）画一个细箭头。
 class LinkPainter extends CustomPainter {
   LinkPainter(this.links);
@@ -205,16 +217,7 @@ class LinkPainter extends CustomPainter {
 
   void _paintLink(Canvas canvas, PaintedLink link) {
     final curve = link.curve;
-    final full = Path()
-      ..moveTo(curve.start.x, curve.start.y)
-      ..cubicTo(
-        curve.control1.x,
-        curve.control1.y,
-        curve.control2.x,
-        curve.control2.y,
-        curve.end.x,
-        curve.end.y,
-      );
+    final full = _curvePath(curve);
     final metric = full.computeMetrics().firstOrNull;
     // 两张卡片重叠时曲线缩成一个点，没有可画的。
     if (metric == null || metric.length == 0 || link.progress <= 0) return;
@@ -254,4 +257,34 @@ class LinkPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(LinkPainter oldDelegate) => oldDelegate.links != links;
+}
+
+/// 碰撞连线的预览：一条从被拖卡片指向目标卡片的虚线。
+class LinkPreviewPainter extends CustomPainter {
+  LinkPreviewPainter(this.curve);
+
+  final LinkCurve curve;
+
+  /// 虚线每一段的长度和段间的空隙。
+  static const _dash = 6.0;
+  static const _gap = 4.0;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = _curvePath(curve);
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round
+      ..color = PlannerTheme.accent;
+    for (final metric in path.computeMetrics()) {
+      for (var at = 0.0; at < metric.length; at += _dash + _gap) {
+        canvas.drawPath(metric.extractPath(at, at + _dash), paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(LinkPreviewPainter oldDelegate) =>
+      oldDelegate.curve != curve;
 }
