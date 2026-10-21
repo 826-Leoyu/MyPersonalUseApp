@@ -304,10 +304,8 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
                       onDoubleTap: () {},
                       child: _CardFrame(
                         colorArgb: TaskCard.defaultColorArgb,
-                        child: _CardEditor(
-                          editing: draft,
-                          colorArgb: TaskCard.defaultColorArgb,
-                        ),
+                        builder: (textColor) =>
+                            _CardEditor(editing: draft, textColor: textColor),
                       ),
                     ),
                   ),
@@ -439,6 +437,9 @@ class _CardViewState extends State<_CardView> {
     final editing = widget.editing;
     // 正在编辑的卡片不能拖。
     final onDragPointer = editing == null ? widget.onDragPointer : null;
+    // 长按（Windows 上也可以右键）弹出菜单。正在编辑的卡片不弹，
+    // 在编辑框里长按、右键是选文字和文字菜单。
+    final onMenu = editing == null ? widget.onMenu : null;
     return Positioned(
       key: BoardCanvas.cardKey(card.id),
       left: widget.liftedPosition?.dx ?? card.x,
@@ -450,14 +451,12 @@ class _CardViewState extends State<_CardView> {
         // 双击卡片是「完成」，由 #20 接上。现在就注册双击，单击从一开始
         // 就和最终版本一样，等双击判定时间过了才生效。
         onDoubleTap: () {},
-        // 长按（Windows 上也可以右键）弹出菜单。正在编辑的卡片不弹，
-        // 在编辑框里长按、右键是选文字和文字菜单。
-        onLongPressStart: editing == null
-            ? (details) => widget.onMenu(details.globalPosition)
-            : null,
-        onSecondaryTapUp: editing == null
-            ? (details) => widget.onMenu(details.globalPosition)
-            : null,
+        onLongPressStart: onMenu == null
+            ? null
+            : (details) => onMenu(details.globalPosition),
+        onSecondaryTapUp: onMenu == null
+            ? null
+            : (details) => onMenu(details.globalPosition),
         // 拖动由拖动状态机处理，这里只用来抢下手势，画布不跟着平移。
         // 正在编辑的卡片不能拖，在编辑框里拖动是选文字。
         onPanStart: editing == null ? (_) {} : null,
@@ -473,12 +472,12 @@ class _CardViewState extends State<_CardView> {
                 onPointerCancel: onDragPointer,
                 child: _CardFrame(
                   colorArgb: card.colorArgb,
-                  child: switch (editing) {
+                  builder: (textColor) => switch (editing) {
                     final editing? => _CardEditor(
                       editing: editing,
-                      colorArgb: card.colorArgb,
+                      textColor: textColor,
                     ),
-                    null => _CardContent(card: card),
+                    null => _CardContent(card: card, textColor: textColor),
                   },
                 ),
               ),
@@ -507,9 +506,10 @@ class _CardViewState extends State<_CardView> {
 /// 卡片上显示的内容：标题自动换行，超出卡片高度时省略；下面是备注的
 /// 第一个非空行，单行省略，字号小一号、颜色淡一些；没有备注时不显示。
 class _CardContent extends StatelessWidget {
-  const _CardContent({required this.card});
+  const _CardContent({required this.card, required this.textColor});
 
   final TaskCard card;
+  final Color textColor;
 
   /// 备注的第一个非空行；没有时返回 null。
   static String? _firstNoteLine(String? note) {
@@ -523,7 +523,6 @@ class _CardContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    final textColor = Color(cardTextColorArgb(card.colorArgb));
     final noteLine = _firstNoteLine(card.note);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -602,13 +601,14 @@ class _ResizeHandle extends StatelessWidget {
   }
 }
 
-/// 卡片的底色、圆角、阴影和内边距。卡片上的文字颜色按底色决定，见
-/// [cardTextColorArgb]。
+/// 卡片的底色、圆角、阴影和内边距。
 class _CardFrame extends StatelessWidget {
-  const _CardFrame({required this.colorArgb, required this.child});
+  const _CardFrame({required this.colorArgb, required this.builder});
 
   final int colorArgb;
-  final Widget child;
+
+  /// 卡片里的内容，拿到按底色决定的文字颜色（见 [cardTextColorArgb]）。
+  final Widget Function(Color textColor) builder;
 
   @override
   Widget build(BuildContext context) {
@@ -618,19 +618,20 @@ class _CardFrame extends StatelessWidget {
         borderRadius: PlannerTheme.cardRadius,
         boxShadow: PlannerTheme.cardShadow,
       ),
-      child: Padding(padding: const EdgeInsets.all(12), child: child),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: builder(Color(cardTextColorArgb(colorArgb))),
+      ),
     );
   }
 }
 
 /// 卡片上的标题和备注编辑框。输入的内容随时写回 [editing]。
 class _CardEditor extends StatefulWidget {
-  const _CardEditor({required this.editing, required this.colorArgb});
+  const _CardEditor({required this.editing, required this.textColor});
 
   final Editing editing;
-
-  /// 卡片的底色，用来决定文字颜色。
-  final int colorArgb;
+  final Color textColor;
 
   @override
   State<_CardEditor> createState() => _CardEditorState();
@@ -650,7 +651,7 @@ class _CardEditorState extends State<_CardEditor> {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    final textColor = Color(cardTextColorArgb(widget.colorArgb));
+    final textColor = widget.textColor;
     final hintStyle = TextStyle(color: textColor.withValues(alpha: 0.5));
     return SingleChildScrollView(
       child: Column(
