@@ -49,7 +49,7 @@ double _squaredDistance(CanvasPoint a, CanvasPoint b) {
 /// 起点和终点取两张卡片距离最近的那一对边的中点。控制点从起点、终点沿各自那条边
 /// 向外的法线方向偏移，偏移量是两点距离的 40%，不超过 [maxControlOffset]。
 LinkCurve linkCurve(CardBox from, CardBox to) {
-  var best = (_Side.top, _Side.top);
+  var best = (from: _Side.top, to: _Side.top);
   var bestDistance = double.infinity;
   for (final fromSide in _Side.values) {
     for (final toSide in _Side.values) {
@@ -58,13 +58,13 @@ LinkCurve linkCurve(CardBox from, CardBox to) {
         _midpoint(to, toSide),
       );
       if (d < bestDistance) {
-        best = (fromSide, toSide);
+        best = (from: fromSide, to: toSide);
         bestDistance = d;
       }
     }
   }
-  final start = _midpoint(from, best.$1);
-  final end = _midpoint(to, best.$2);
+  final start = _midpoint(from, best.from);
+  final end = _midpoint(to, best.to);
   final offset = math.min(_distance(start, end) * 0.4, maxControlOffset);
   CanvasPoint push(CanvasPoint p, _Side side) {
     final n = _outward(side);
@@ -73,8 +73,8 @@ LinkCurve linkCurve(CardBox from, CardBox to) {
 
   return (
     start: start,
-    control1: push(start, best.$1),
-    control2: push(end, best.$2),
+    control1: push(start, best.from),
+    control2: push(end, best.to),
     end: end,
   );
 }
