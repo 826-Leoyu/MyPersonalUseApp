@@ -7,9 +7,6 @@ abstract final class PlannerTheme {
   /// 米白纸张色，画布和页面的背景。
   static const paper = Color(0xFFFBF8F1);
 
-  /// 正文文字色。
-  static const ink = Color(0xFF1C1C1E);
-
   /// 强调色，取备忘录的琥珀黄。
   static const accent = Color(0xFFD9A400);
 

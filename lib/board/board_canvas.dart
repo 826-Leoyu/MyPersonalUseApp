@@ -7,11 +7,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/planner_theme.dart';
 import '../app/providers.dart';
+import '../planner/card_colors.dart';
 import '../planner/day_board.dart';
 import '../planner/planner_exceptions.dart';
 import '../planner/planner_service.dart';
 import '../planner/task_card.dart';
 import 'board_selection.dart';
+import 'card_color_dialog.dart';
 import 'card_drag.dart';
 
 /// 一天的画布：卡片按坐标绝对定位显示。
@@ -110,6 +112,41 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
       (_contentKey.currentContext!.findRenderObject()! as RenderBox)
           .globalToLocal(global);
 
+  /// 长按卡片（Windows 上也可以右键）：在 [global] 处弹出卡片菜单。
+  Future<void> _openCardMenu(TaskCard card, Offset global) async {
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final at = overlay.globalToLocal(global);
+    final action = await showMenu<_CardMenuAction>(
+      context: context,
+      position: RelativeRect.fromRect(
+        at & Size.zero,
+        Offset.zero & overlay.size,
+      ),
+      items: const [
+        PopupMenuItem(value: _CardMenuAction.recolor, child: Text('改颜色')),
+        PopupMenuItem(value: _CardMenuAction.edit, child: Text('编辑')),
+        PopupMenuItem(value: _CardMenuAction.delete, child: Text('删除')),
+      ],
+    );
+    if (action == null || !mounted) return;
+    switch (action) {
+      case _CardMenuAction.recolor:
+        await showCardColorDialog(
+          context,
+          currentArgb: card.colorArgb,
+          onPick: (argb) => _save(() async {
+            final service = await ref.read(plannerServiceProvider.future);
+            await service.setCardColor(card.id, argb);
+          }),
+        );
+      case _CardMenuAction.edit:
+        await _save(() => _selection.editCard(card));
+      case _CardMenuAction.delete:
+        await _save(() => _selection.deleteCard(card.id));
+    }
+  }
+
   Future<bool> _resizeCard(TaskCard card, Size size) => _save(() async {
     final service = await ref.read(plannerServiceProvider.future);
     await service.resizeCard(card.id, width: size.width, height: size.height);
@@ -126,7 +163,6 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
           card.id,
           origin: Offset(card.x, card.y),
           pointer: _globalToCanvas(event.position),
-          at: event.timeStamp,
           // 判定距离是屏幕上的距离，换算成画布上的距离。
           slop:
               computePanSlop(
@@ -136,10 +172,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
               _transform.value.getMaxScaleOnAxis(),
         );
       case PointerMoveEvent() when event.pointer == _dragPointerId:
-        setState(
-          () =>
-              _drag.move(_globalToCanvas(event.position), at: event.timeStamp),
-        );
+        setState(() => _drag.move(_globalToCanvas(event.position)));
       case PointerUpEvent() when event.pointer == _dragPointerId:
         _dragPointerId = null;
         final drop = _drag.up();
@@ -254,6 +287,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
                     onTap: () => _save(() => _selection.tapCard(card)),
                     onDragPointer: (event) => _onCardPointer(card, event),
                     onDragCancel: _onCardDragCancel,
+                    onMenu: (global) => _openCardMenu(card, global),
                     globalToCanvas: _globalToCanvas,
                     onResize: (size) => _resizeCard(card, size),
                   ),
@@ -270,7 +304,8 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
                       onDoubleTap: () {},
                       child: _CardFrame(
                         colorArgb: TaskCard.defaultColorArgb,
-                        child: _CardEditor(editing: draft),
+                        builder: (textColor) =>
+                            _CardEditor(editing: draft, textColor: textColor),
                       ),
                     ),
                   ),
@@ -298,6 +333,9 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
   }
 }
 
+/// 卡片菜单里的操作。
+enum _CardMenuAction { recolor, edit, delete }
+
 class _CardView extends StatefulWidget {
   const _CardView({
     super.key,
@@ -308,6 +346,7 @@ class _CardView extends StatefulWidget {
     required this.onTap,
     required this.onDragPointer,
     required this.onDragCancel,
+    required this.onMenu,
     required this.globalToCanvas,
     required this.onResize,
   });
@@ -328,6 +367,9 @@ class _CardView extends StatefulWidget {
 
   /// 卡片的手势被别的操作抢走了。
   final VoidCallback onDragCancel;
+
+  /// 长按或右键卡片，[global] 是按下的位置（屏幕坐标）。
+  final void Function(Offset global) onMenu;
 
   /// 把屏幕坐标换算成画布坐标。
   final Offset Function(Offset global) globalToCanvas;
@@ -395,6 +437,9 @@ class _CardViewState extends State<_CardView> {
     final editing = widget.editing;
     // 正在编辑的卡片不能拖。
     final onDragPointer = editing == null ? widget.onDragPointer : null;
+    // 长按（Windows 上也可以右键）弹出菜单。正在编辑的卡片不弹，
+    // 在编辑框里长按、右键是选文字和文字菜单。
+    final onMenu = editing == null ? widget.onMenu : null;
     return Positioned(
       key: BoardCanvas.cardKey(card.id),
       left: widget.liftedPosition?.dx ?? card.x,
@@ -406,8 +451,12 @@ class _CardViewState extends State<_CardView> {
         // 双击卡片是「完成」，由 #20 接上。现在就注册双击，单击从一开始
         // 就和最终版本一样，等双击判定时间过了才生效。
         onDoubleTap: () {},
-        // 长按是菜单，由 #16 接上。现在就注册长按，按住不动不会变成单击。
-        onLongPress: editing == null ? () {} : null,
+        onLongPressStart: onMenu == null
+            ? null
+            : (details) => onMenu(details.globalPosition),
+        onSecondaryTapUp: onMenu == null
+            ? null
+            : (details) => onMenu(details.globalPosition),
         // 拖动由拖动状态机处理，这里只用来抢下手势，画布不跟着平移。
         // 正在编辑的卡片不能拖，在编辑框里拖动是选文字。
         onPanStart: editing == null ? (_) {} : null,
@@ -423,9 +472,12 @@ class _CardViewState extends State<_CardView> {
                 onPointerCancel: onDragPointer,
                 child: _CardFrame(
                   colorArgb: card.colorArgb,
-                  child: switch (editing) {
-                    final editing? => _CardEditor(editing: editing),
-                    null => _CardContent(card: card),
+                  builder: (textColor) => switch (editing) {
+                    final editing? => _CardEditor(
+                      editing: editing,
+                      textColor: textColor,
+                    ),
+                    null => _CardContent(card: card, textColor: textColor),
                   },
                 ),
               ),
@@ -454,9 +506,10 @@ class _CardViewState extends State<_CardView> {
 /// 卡片上显示的内容：标题自动换行，超出卡片高度时省略；下面是备注的
 /// 第一个非空行，单行省略，字号小一号、颜色淡一些；没有备注时不显示。
 class _CardContent extends StatelessWidget {
-  const _CardContent({required this.card});
+  const _CardContent({required this.card, required this.textColor});
 
   final TaskCard card;
+  final Color textColor;
 
   /// 备注的第一个非空行；没有时返回 null。
   static String? _firstNoteLine(String? note) {
@@ -477,7 +530,7 @@ class _CardContent extends StatelessWidget {
         Flexible(
           child: _HeightLimitedText(
             card.title,
-            style: textTheme.bodyLarge?.copyWith(color: PlannerTheme.ink),
+            style: textTheme.bodyLarge?.copyWith(color: textColor),
           ),
         ),
         if (noteLine != null)
@@ -486,7 +539,7 @@ class _CardContent extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: textTheme.bodyMedium?.copyWith(
-              color: PlannerTheme.ink.withValues(alpha: 0.6),
+              color: textColor.withValues(alpha: 0.6),
             ),
           ),
       ],
@@ -550,10 +603,12 @@ class _ResizeHandle extends StatelessWidget {
 
 /// 卡片的底色、圆角、阴影和内边距。
 class _CardFrame extends StatelessWidget {
-  const _CardFrame({required this.colorArgb, required this.child});
+  const _CardFrame({required this.colorArgb, required this.builder});
 
   final int colorArgb;
-  final Widget child;
+
+  /// 卡片里的内容，拿到按底色决定的文字颜色（见 [cardTextColorArgb]）。
+  final Widget Function(Color textColor) builder;
 
   @override
   Widget build(BuildContext context) {
@@ -563,16 +618,20 @@ class _CardFrame extends StatelessWidget {
         borderRadius: PlannerTheme.cardRadius,
         boxShadow: PlannerTheme.cardShadow,
       ),
-      child: Padding(padding: const EdgeInsets.all(12), child: child),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: builder(Color(cardTextColorArgb(colorArgb))),
+      ),
     );
   }
 }
 
 /// 卡片上的标题和备注编辑框。输入的内容随时写回 [editing]。
 class _CardEditor extends StatefulWidget {
-  const _CardEditor({required this.editing});
+  const _CardEditor({required this.editing, required this.textColor});
 
   final Editing editing;
+  final Color textColor;
 
   @override
   State<_CardEditor> createState() => _CardEditorState();
@@ -592,6 +651,8 @@ class _CardEditorState extends State<_CardEditor> {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final textColor = widget.textColor;
+    final hintStyle = TextStyle(color: textColor.withValues(alpha: 0.5));
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -603,8 +664,11 @@ class _CardEditorState extends State<_CardEditor> {
             inputFormatters: [
               LengthLimitingTextInputFormatter(PlannerService.maxTitleLength),
             ],
-            style: textTheme.bodyLarge?.copyWith(color: PlannerTheme.ink),
-            decoration: const InputDecoration.collapsed(hintText: '标题'),
+            style: textTheme.bodyLarge?.copyWith(color: textColor),
+            decoration: InputDecoration.collapsed(
+              hintText: '标题',
+              hintStyle: hintStyle,
+            ),
             onChanged: (value) => widget.editing.title = value,
           ),
           const SizedBox(height: 4),
@@ -614,8 +678,11 @@ class _CardEditorState extends State<_CardEditor> {
             inputFormatters: [
               LengthLimitingTextInputFormatter(PlannerService.maxNoteLength),
             ],
-            style: textTheme.bodyMedium?.copyWith(color: PlannerTheme.ink),
-            decoration: const InputDecoration.collapsed(hintText: '备注'),
+            style: textTheme.bodyMedium?.copyWith(color: textColor),
+            decoration: InputDecoration.collapsed(
+              hintText: '备注',
+              hintStyle: hintStyle,
+            ),
             onChanged: (value) => widget.editing.note = value,
           ),
         ],
