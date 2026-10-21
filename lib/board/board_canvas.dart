@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/planner_theme.dart';
 import '../app/providers.dart';
+import '../formatting/date_format.dart';
 import '../planner/card_colors.dart';
 import '../planner/day_board.dart';
 import '../planner/link_geometry.dart';
@@ -19,6 +20,7 @@ import '../planner/task_card.dart';
 import 'board_selection.dart';
 import 'card_color_dialog.dart';
 import 'card_drag.dart';
+import 'drop_zones.dart';
 import 'link_layer.dart';
 
 /// 一天的画布：卡片按坐标绝对定位显示。
@@ -54,6 +56,9 @@ class BoardCanvas extends ConsumerStatefulWidget {
 
   /// 完成时卡片打勾消失的时长。
   static const completeDuration = Duration(milliseconds: 200);
+
+  /// 删除后撤销提示显示的时长。
+  static const undoDuration = Duration(seconds: 4);
 
   /// 正在完成的卡片上的 ✓ 的 key。
   static const completeCheckKey = ValueKey('complete-check');
@@ -108,6 +113,9 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     ),
   );
   int? _dragPointerId;
+
+  /// 拖动时底部的投放区，按屏幕坐标判断指针在哪个区里。
+  final _dropZones = DropZoneLocator();
 
   /// 给拖动状态机计时。测试里跟着假时间走。
   final _dragClock = clock.stopwatch()..start();
@@ -186,7 +194,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
         }
         if (widget.board.cards.where((c) => c.id == cardId).firstOrNull
             case final card?) {
-          _completeCard(card);
+          _finishCard(card, DropZone.complete);
         }
         return;
       case null:
@@ -244,7 +252,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       case _CardMenuAction.edit:
         await _save(() => _selection.editCard(card));
       case _CardMenuAction.delete:
-        await _save(() => _selection.deleteCard(card.id));
+        await _finishCard(card, DropZone.trash);
     }
   }
 
@@ -288,6 +296,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
             _globalToCanvas(event.position),
             cards: _cardBoxes(),
             now: _dragClock.elapsed,
+            zone: _dropZones.zoneAt(event.position),
           ),
         );
         _syncArmTimer();
@@ -300,7 +309,9 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
             _moveCard(drop);
           case final CardLinkToggled toggled:
             _toggleLink(toggled);
-          case CardDropped() || null:
+          case final CardDropped dropped:
+            _dropCard(dropped);
+          case null:
             setState(() {});
         }
       case PointerCancelEvent() when event.pointer == _dragPointerId:
@@ -368,6 +379,8 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
           Curves.easeOutCubic.transform(_bounceAnimation.value),
         )!,
       if (_dropping case (:final cardId, :final position)) cardId: position,
+      for (final MapEntry(key: cardId, value: leaving) in _leaving.entries)
+        cardId: ?leaving.at,
       if (_drag.dragged case (:final cardId, :final position)) cardId: position,
     };
   }
@@ -385,13 +398,102 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     ];
   }
 
-  /// 完成卡片：先打勾消失，同时在后台保存。保存失败时卡片回到原处。
+  /// 完成卡片（[DropZone.complete]，先打勾消失）或移到回收站
+  /// （[DropZone.trash]，立即消失），同时在后台保存。保存失败时卡片回到原处。
   /// 卡片已经在退场时什么都不做，不会重复保存。
-  Future<void> _completeCard(TaskCard card) async {
+  ///
+  /// [dropped] 是拖进投放区松手的结果：卡片在松手的位置退场，保存失败时
+  /// 从那里弹回起点。
+  Future<void> _finishCard(
+    TaskCard card,
+    DropZone action, {
+    CardDropped? dropped,
+  }) async {
     if (_leaving.containsKey(card.id)) return;
-    setState(() => _leaving[card.id] = _Leaving(card));
-    final saved = await _save(() => _selection.completeCard(card.id));
-    if (!saved && mounted) setState(() => _leaving.remove(card.id));
+    setState(
+      () =>
+          _leaving[card.id] = _Leaving(card, at: dropped?.releasedAt)
+            ..gone = action == DropZone.trash,
+    );
+    final saved = await _save(
+      () => switch (action) {
+        DropZone.complete => _selection.completeCard(card.id),
+        DropZone.trash => _selection.deleteCard(card.id),
+      },
+    );
+    if (!mounted) return;
+    if (!saved) return _returnCard(card.id, dropped);
+    if (action == DropZone.trash) _showUndoDelete(card);
+  }
+
+  /// 删除成功后的撤销提示：点「撤销」把卡片从回收站拿回来。新的提示顶替
+  /// 旧的，每个提示只恢复自己那张卡片。
+  void _showUndoDelete(TaskCard card) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    final service = ref.read(plannerServiceProvider.future);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('已移到回收站：『${card.title}』'),
+          duration: BoardCanvas.undoDuration,
+          // 带按钮的提示默认不会自己消失。
+          persist: false,
+          action: SnackBarAction(
+            label: '撤销',
+            onPressed: () => _undoDelete(card, service, messenger),
+          ),
+        ),
+      );
+  }
+
+  /// 点了撤销提示上的「撤销」。画布可能已经换了一天，所以不依赖画布还在。
+  /// 卡片原来的日期已经过去、恢复时被顺延到今天的，另外提示一下。
+  Future<void> _undoDelete(
+    TaskCard card,
+    Future<PlannerService> service,
+    ScaffoldMessengerState messenger,
+  ) async {
+    if (mounted) setState(() => _leaving.remove(card.id));
+    try {
+      final planner = await service;
+      await planner.restoreCard(card.id);
+      final location = await planner.findCard(card.id);
+      if (location.dayKey != card.dayKey) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('已恢复至今天（${formatShortDate(location.dayKey)}）'),
+          ),
+        );
+      }
+    } on PlannerException {
+      messenger.showSnackBar(const SnackBar(content: Text('恢复失败，请重试')));
+    }
+  }
+
+  /// 保存失败：退场的卡片回到画布上原来的地方。拖进投放区的从松手的位置
+  /// 弹回起点。
+  void _returnCard(String cardId, CardDropped? dropped) {
+    setState(() => _leaving.remove(cardId));
+    if (dropped == null) return;
+    setState(
+      () => _bounce = (
+        cardId: cardId,
+        from: dropped.releasedAt,
+        to: dropped.origin,
+      ),
+    );
+    _bounceAnimation.forward(from: 0);
+  }
+
+  /// 在投放区里松手：完成或删除卡片。
+  void _dropCard(CardDropped dropped) {
+    final card = widget.board.cards
+        .where((c) => c.id == dropped.cardId)
+        .firstOrNull;
+    if (card == null) return setState(() {});
+    _finishCard(card, dropped.zone, dropped: dropped);
   }
 
   /// 卡片的退场动画播完了：不再显示它。
@@ -689,7 +791,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
                         : null,
                     box: boxes[card.id]!,
                     onTap: () => _save(() => _selection.tapCard(card)),
-                    onDoubleTap: () => _completeCard(card),
+                    onDoubleTap: () => _finishCard(card, DropZone.complete),
                     onPointerDown: () => _downOn = _DownOnCard(card.id),
                     onDragPointer: (event) => _onCardPointer(card, event),
                     onDragCancel: _onCardDragCancel,
@@ -729,7 +831,21 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
         Positioned.fill(child: canvas),
         if (selectedLink != null)
           _linkScissors(selectedLink, curves[selectedLink]!),
-        if (widget.canCreateCards)
+        if (_drag.state case final CardDragging dragging)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: DropZoneBar(
+              locator: _dropZones,
+              active: switch (dragging) {
+                CardOverZone(:final zone) => zone,
+                _ => null,
+              },
+            ),
+          ),
+        // 拖动时投放区占着底部，「＋」先藏起来。
+        if (widget.canCreateCards && _drag.dragged == null)
           Positioned(
             right: 16,
             bottom: 16,
@@ -1026,10 +1142,13 @@ class _CompletingCard extends StatelessWidget {
 
 /// 一张正在退场的卡片。
 class _Leaving {
-  _Leaving(this.card);
+  _Leaving(this.card, {this.at});
 
   /// 开始退场时的卡片，数据库里已经没有它、动画还没播完时用它来画。
   final TaskCard card;
+
+  /// 拖进投放区松手的位置，卡片在这里退场；在原处退场时为 null。
+  final Offset? at;
 
   /// 退场动画播完了，不再显示。
   bool gone = false;
