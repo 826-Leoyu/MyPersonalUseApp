@@ -10,6 +10,9 @@ abstract final class PlannerTheme {
   /// 强调色，取备忘录的琥珀黄。
   static const accent = Color(0xFFD9A400);
 
+  /// 连线的颜色：半透明的深灰（卡片近黑色文字的 60%）。选中时用 [accent]。
+  static const linkColor = Color(0x991C1C1E);
+
   /// 卡片的圆角。
   static const cardRadius = BorderRadius.all(Radius.circular(12));
 

@@ -77,6 +77,25 @@ class BoardHarness {
     return result as T;
   }
 
+  /// 直接改数据库，把卡片挪到 [dayKey] 那一天。正常操作造不出两端不在同一天的
+  /// 连线，用它来模拟。
+  Future<void> moveCardToDay(
+    WidgetTester tester,
+    String cardId,
+    DayKey dayKey,
+  ) async {
+    await tester.runAsync(() async {
+      final database = _newConnection();
+      try {
+        await (database.update(database.taskCards)
+              ..where((c) => c.id.equals(cardId)))
+            .write(TaskCardsCompanion(dayKey: Value(dayKey.toString())));
+      } finally {
+        await database.close();
+      }
+    });
+  }
+
   /// 通过 service 读出某一天的画布内容，用来检查结果。
   Future<DayBoard> readBoard(WidgetTester tester, DayKey dayKey) =>
       seed(tester, (service) => service.watchDay(dayKey).first);

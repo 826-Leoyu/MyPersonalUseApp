@@ -9,12 +9,14 @@ import '../app/planner_theme.dart';
 import '../app/providers.dart';
 import '../planner/card_colors.dart';
 import '../planner/day_board.dart';
+import '../planner/link_geometry.dart';
 import '../planner/planner_exceptions.dart';
 import '../planner/planner_service.dart';
 import '../planner/task_card.dart';
 import 'board_selection.dart';
 import 'card_color_dialog.dart';
 import 'card_drag.dart';
+import 'link_layer.dart';
 
 /// 一天的画布：卡片按坐标绝对定位显示。
 ///
@@ -67,6 +69,13 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
 
   /// 松手后正在保存的新位置；保存好的位置从数据库回来后清掉。
   CardDrop? _dropping;
+
+  /// 正在拖手柄、或者刚拖完还没保存好的卡片的临时大小；保存好的大小从数据库
+  /// 回来后清掉。连线也跟着这个大小。
+  final _resizing = <String, Size>{};
+
+  /// 正按着手柄在拖的卡片。
+  String? _resizeHandleCardId;
 
   BoardSelectionController get _selection =>
       ref.read(boardSelectionProvider.notifier);
@@ -147,10 +156,20 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
     }
   }
 
-  Future<bool> _resizeCard(TaskCard card, Size size) => _save(() async {
-    final service = await ref.read(plannerServiceProvider.future);
-    await service.resizeCard(card.id, width: size.width, height: size.height);
-  });
+  void _onResizeUpdate(TaskCard card, Size size) =>
+      setState(() => _resizing[card.id] = size);
+
+  /// 松开手柄：保存新的大小。保存失败时回到原来的大小。
+  Future<void> _onResizeEnd(TaskCard card) async {
+    _resizeHandleCardId = null;
+    final size = _resizing[card.id];
+    if (size == null) return;
+    final saved = await _save(() async {
+      final service = await ref.read(plannerServiceProvider.future);
+      await service.resizeCard(card.id, width: size.width, height: size.height);
+    });
+    if (!saved && mounted) setState(() => _resizing.remove(card.id));
+  }
 
   /// 按在卡片上的指针事件交给拖动状态机。同一时间只跟踪一个指针。
   void _onCardPointer(TaskCard card, PointerEvent event) {
@@ -210,6 +229,13 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
       final card = widget.board.cards.where((c) => c.id == cardId).firstOrNull;
       if (card == null || Offset(card.x, card.y) == position) _dropping = null;
     }
+    // 保存好的大小从数据库回来了，不再需要临时的大小。正按着手柄的卡片除外。
+    final oldCards = {for (final c in oldWidget.board.cards) c.id: c};
+    _resizing.removeWhere((cardId, _) {
+      if (cardId == _resizeHandleCardId) return false;
+      final card = widget.board.cards.where((c) => c.id == cardId).firstOrNull;
+      return card == null || !identical(card, oldCards[cardId]);
+    });
   }
 
   /// 执行一个要保存的操作；保存失败时提示，返回 false。
@@ -243,6 +269,15 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
       ...cards.where((c) => c.id != lifted?.cardId),
       ...cards.where((c) => c.id == lifted?.cardId),
     ];
+    final boxes = <String, CardBox>{
+      for (final card in cards)
+        card.id: (
+          x: card.id == lifted?.cardId ? lifted!.position.dx : card.x,
+          y: card.id == lifted?.cardId ? lifted!.position.dy : card.y,
+          width: _resizing[card.id]?.width ?? card.width,
+          height: _resizing[card.id]?.height ?? card.height,
+        ),
+    };
     final width = cards.fold(0.0, (w, c) => math.max(w, c.x + c.width));
     final height = cards.fold(0.0, (h, c) => math.max(h, c.y + c.height));
     final canvas = Listener(
@@ -270,6 +305,12 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
             height: height + _canvasPadding,
             child: Stack(
               children: [
+                // 连线画在所有卡片下面，不参与点击。
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: LinkLayer(links: widget.board.links, boxes: boxes),
+                  ),
+                ),
                 for (final card in ordered)
                   _CardView(
                     key: ValueKey(card.id),
@@ -289,7 +330,10 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
                     onDragCancel: _onCardDragCancel,
                     onMenu: (global) => _openCardMenu(card, global),
                     globalToCanvas: _globalToCanvas,
-                    onResize: (size) => _resizeCard(card, size),
+                    resizing: _resizing[card.id],
+                    onResizeStart: () => _resizeHandleCardId = card.id,
+                    onResizeUpdate: (size) => _onResizeUpdate(card, size),
+                    onResizeEnd: () => _onResizeEnd(card),
                   ),
                 if (selection case final EditingNewCard draft)
                   Positioned(
@@ -348,7 +392,10 @@ class _CardView extends StatefulWidget {
     required this.onDragCancel,
     required this.onMenu,
     required this.globalToCanvas,
-    required this.onResize,
+    required this.resizing,
+    required this.onResizeStart,
+    required this.onResizeUpdate,
+    required this.onResizeEnd,
   });
 
   final TaskCard card;
@@ -374,61 +421,42 @@ class _CardView extends StatefulWidget {
   /// 把屏幕坐标换算成画布坐标。
   final Offset Function(Offset global) globalToCanvas;
 
-  /// 拖完手柄后保存新的大小；保存失败时返回 false。
-  final Future<bool> Function(Size size) onResize;
+  /// 正在拖手柄、或者刚拖完还没保存好时的大小；平时为 null，用卡片自己的大小。
+  final Size? resizing;
+
+  /// 按下手柄、拖动手柄（[size] 是新的大小，已经限制在上下限以内）、松开手柄。
+  final VoidCallback onResizeStart;
+  final void Function(Size size) onResizeUpdate;
+  final VoidCallback onResizeEnd;
 
   @override
   State<_CardView> createState() => _CardViewState();
 }
 
 class _CardViewState extends State<_CardView> {
-  /// 正在拖手柄、或者刚拖完还没保存好时的大小；平时为 null，用卡片自己的大小。
-  Size? _resizing;
-
   /// 按下手柄时，指针离卡片右下角的距离（画布坐标）。
   Offset _grabOffset = Offset.zero;
 
-  /// 是不是正按着手柄在拖。
-  bool _dragging = false;
-
-  @override
-  void didUpdateWidget(_CardView oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // 保存好的大小从数据库回来了，不再需要临时的大小。
-    if (!identical(oldWidget.card, widget.card) && !_dragging) {
-      _resizing = null;
-    }
-  }
-
   Offset get _corner {
     final card = widget.card;
-    final size = _resizing ?? Size(card.width, card.height);
+    final size = widget.resizing ?? Size(card.width, card.height);
     return Offset(card.x + size.width, card.y + size.height);
   }
 
   void _onResizeStart(DragStartDetails details) {
-    _dragging = true;
     _grabOffset = widget.globalToCanvas(details.globalPosition) - _corner;
+    widget.onResizeStart();
   }
 
   void _onResizeUpdate(DragUpdateDetails details) {
     final card = widget.card;
     final corner = widget.globalToCanvas(details.globalPosition) - _grabOffset;
-    setState(() {
-      _resizing = Size(
+    widget.onResizeUpdate(
+      Size(
         (corner.dx - card.x).clamp(TaskCard.minWidth, TaskCard.maxWidth),
         (corner.dy - card.y).clamp(TaskCard.minHeight, TaskCard.maxHeight),
-      );
-    });
-  }
-
-  Future<void> _onResizeEnd(DragEndDetails details) async {
-    _dragging = false;
-    final size = _resizing;
-    if (size == null) return;
-    final saved = await widget.onResize(size);
-    // 保存失败时回到原来的大小。
-    if (!saved && mounted) setState(() => _resizing = null);
+      ),
+    );
   }
 
   @override
@@ -444,8 +472,8 @@ class _CardViewState extends State<_CardView> {
       key: BoardCanvas.cardKey(card.id),
       left: widget.liftedPosition?.dx ?? card.x,
       top: widget.liftedPosition?.dy ?? card.y,
-      width: _resizing?.width ?? card.width,
-      height: _resizing?.height ?? card.height,
+      width: widget.resizing?.width ?? card.width,
+      height: widget.resizing?.height ?? card.height,
       child: GestureDetector(
         onTap: widget.onTap,
         // 双击卡片是「完成」，由 #20 接上。现在就注册双击，单击从一开始
@@ -492,7 +520,7 @@ class _CardViewState extends State<_CardView> {
                   dragStartBehavior: DragStartBehavior.down,
                   onPanStart: _onResizeStart,
                   onPanUpdate: _onResizeUpdate,
-                  onPanEnd: _onResizeEnd,
+                  onPanEnd: (_) => widget.onResizeEnd(),
                   child: const _ResizeHandle(),
                 ),
               ),
