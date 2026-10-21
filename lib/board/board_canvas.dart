@@ -46,6 +46,9 @@ class BoardCanvas extends ConsumerStatefulWidget {
   /// 拖着卡片停在另一张已连上的卡片上时，✂️ 断开预览的 key。
   static const unlinkPreviewKey = ValueKey('unlink-preview');
 
+  /// 选中的连线中点上 ✂️ 按钮的 key。
+  static const linkScissorsKey = ValueKey('link-scissors');
+
   /// 连线或断开后，被拖的卡片弹回起点的时长。
   static const bounceDuration = Duration(milliseconds: 250);
 
@@ -75,6 +78,9 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
 
   /// 最近一次双击空白处的位置（画布可视区域里的坐标）。
   Offset? _doubleTapPosition;
+
+  /// 最近一次双击连线的位置（画布坐标）。
+  Offset _linkDoubleTapPosition = Offset.zero;
 
   /// 拖动卡片的状态机，和正在拖卡片的指针。
   late final _drag = CardDragMachine(
@@ -159,17 +165,19 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       (_contentKey.currentContext!.findRenderObject()! as RenderBox)
           .globalToLocal(global);
 
-  /// 长按卡片（Windows 上也可以右键）：在 [global] 处弹出卡片菜单。
-  Future<void> _openCardMenu(TaskCard card, Offset global) async {
+  /// 弹出菜单的位置：屏幕上的 [global] 处。
+  RelativeRect _menuPosition(Offset global) {
     final overlay =
         Overlay.of(context).context.findRenderObject()! as RenderBox;
     final at = overlay.globalToLocal(global);
+    return RelativeRect.fromRect(at & Size.zero, Offset.zero & overlay.size);
+  }
+
+  /// 长按卡片（Windows 上也可以右键）：在 [global] 处弹出卡片菜单。
+  Future<void> _openCardMenu(TaskCard card, Offset global) async {
     final action = await showMenu<_CardMenuAction>(
       context: context,
-      position: RelativeRect.fromRect(
-        at & Size.zero,
-        Offset.zero & overlay.size,
-      ),
+      position: _menuPosition(global),
       items: const [
         PopupMenuItem(value: _CardMenuAction.recolor, child: Text('改颜色')),
         PopupMenuItem(value: _CardMenuAction.edit, child: Text('编辑')),
@@ -337,6 +345,67 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     };
   }
 
+  /// 画布当前的缩放比例。
+  double get _scale => _transform.value.getMaxScaleOnAxis();
+
+  /// 画布上显示着的连线和它们现在的曲线，按从下到上的绘制顺序。
+  Map<String, LinkCurve> _linkCurves() =>
+      linkCurves(widget.board.links, _cardBoxes());
+
+  /// 画布上的 [position] 点中的连线；没点中时返回 null。
+  String? _linkAt(Offset position) =>
+      linkAt(_linkCurves(), (x: position.dx, y: position.dy), scale: _scale);
+
+  /// 单击连线附近：选中点中的那条。
+  void _onTapLink(Offset position) {
+    final linkId = _linkAt(position);
+    if (linkId == null) return;
+    _save(() => _selection.tapLink(linkId));
+  }
+
+  /// 右键连线附近：在 [global] 处弹出「断开连线」菜单。不改变选中。
+  Future<void> _openLinkMenu(Offset position, Offset global) async {
+    final linkId = _linkAt(position);
+    if (linkId == null) return;
+    final remove = await showMenu<bool>(
+      context: context,
+      position: _menuPosition(global),
+      items: const [PopupMenuItem(value: true, child: Text('断开连线'))],
+    );
+    if (remove != true || !mounted) return;
+    await _save(() => _selection.removeLink(linkId));
+  }
+
+  /// 选中的连线中点上的 ✂️，盖在画布上面，不随缩放变大变小。
+  Widget _linkScissors(String linkId, LinkCurve curve) {
+    final middle = linkCurveMidpoint(curve);
+    return ListenableBuilder(
+      listenable: _transform,
+      builder: (context, _) {
+        final center = MatrixUtils.transformPoint(
+          _transform.value,
+          Offset(middle.x, middle.y),
+        );
+        return Positioned(
+          key: BoardCanvas.linkScissorsKey,
+          left: center.dx - _scissorsHitSize / 2,
+          top: center.dy - _scissorsHitSize / 2,
+          width: _scissorsHitSize,
+          height: _scissorsHitSize,
+          // 立即响应，不等双击判定；整个点击范围都接住点击，不落到下面。
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _save(() => _selection.removeLink(linkId)),
+            child: const Center(child: _Scissors()),
+          ),
+        );
+      },
+    );
+  }
+
+  /// ✂️ 按钮的点击范围（屏幕上的逻辑像素）。
+  static const _scissorsHitSize = 44.0;
+
   /// 保存拖动后的位置。保存好之前卡片停在新位置；保存失败时回到原处。
   Future<void> _moveCard(CardDrop drop) async {
     final (:cardId, :position) = drop;
@@ -367,6 +436,14 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       final card = cards[cardId];
       return card == null || !identical(card, oldCards[cardId]);
     });
+    // 选中的连线不再显示了：取消选中。刷新画布的过程中不能改选中状态，
+    // 等这一帧画完。
+    if (ref.read(boardSelectionProvider) case LinkSelected(:final linkId)
+        when !widget.board.links.any((l) => l.id == linkId)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _selection.forgetLink(linkId);
+      });
+    }
   }
 
   /// 执行一个要保存的操作；保存失败时提示，返回 false。
@@ -403,24 +480,14 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       ];
     }
     final middle = linkCurveMidpoint(curve);
-    const size = 32.0;
     return [
       Positioned(
         key: BoardCanvas.unlinkPreviewKey,
-        left: middle.x - size / 2,
-        top: middle.y - size / 2,
-        width: size,
-        height: size,
-        child: const IgnorePointer(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: PlannerTheme.accent,
-              shape: BoxShape.circle,
-              boxShadow: PlannerTheme.cardShadow,
-            ),
-            child: Icon(Icons.content_cut, size: 18, color: Colors.white),
-          ),
-        ),
+        left: middle.x - _Scissors.size / 2,
+        top: middle.y - _Scissors.size / 2,
+        width: _Scissors.size,
+        height: _Scissors.size,
+        child: const IgnorePointer(child: _Scissors()),
       ),
     ];
   }
@@ -444,6 +511,11 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     final ordered = [for (final id in boxes.keys) cardsById[id]!];
     final armed = switch (_drag.state) {
       final CardArmed armed => armed,
+      _ => null,
+    };
+    final curves = linkCurves(widget.board.links, boxes);
+    final selectedLink = switch (selection) {
+      LinkSelected(:final linkId) when curves.containsKey(linkId) => linkId,
       _ => null,
     };
     final width = cards.fold(0.0, (w, c) => math.max(w, c.x + c.width));
@@ -473,10 +545,36 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
             height: height + _canvasPadding,
             child: Stack(
               children: [
-                // 连线画在所有卡片下面，不参与点击。
+                // 连线画在所有卡片下面。
                 Positioned.fill(
                   child: IgnorePointer(
-                    child: LinkLayer(links: widget.board.links, boxes: boxes),
+                    child: LinkLayer(
+                      links: widget.board.links,
+                      boxes: boxes,
+                      selectedLinkId: selectedLink,
+                    ),
+                  ),
+                ),
+                // 连线的点击范围：只有连线附近能点，其余地方点下去落到空白处。
+                // 在卡片下面，卡片盖住连线时点的是卡片。
+                Positioned.fill(
+                  child: GestureDetector(
+                    onTapUp: (details) => _onTapLink(details.localPosition),
+                    // 双击连线和单击一样。连线自己接住双击，外面的画布才不会
+                    // 当成双击空白处新建卡片。
+                    onDoubleTapDown: (details) =>
+                        _linkDoubleTapPosition = details.localPosition,
+                    onDoubleTap: () => _onTapLink(_linkDoubleTapPosition),
+                    // 右键和卡片一样不区分平台；手机上没有右键。
+                    onSecondaryTapUp: (details) => _openLinkMenu(
+                      details.localPosition,
+                      details.globalPosition,
+                    ),
+                    child: CustomPaint(
+                      painter: _LinkHitArea(
+                        (position) => _linkAt(position) != null,
+                      ),
+                    ),
                   ),
                 ),
                 for (final card in ordered)
@@ -529,6 +627,8 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     return Stack(
       children: [
         Positioned.fill(child: canvas),
+        if (selectedLink != null)
+          _linkScissors(selectedLink, curves[selectedLink]!),
         if (widget.canCreateCards)
           Positioned(
             right: 16,
@@ -542,6 +642,44 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       ],
     );
   }
+}
+
+/// 连线的点击范围：什么也不画，只在 [hits] 成立的位置接住点击。
+class _LinkHitArea extends CustomPainter {
+  _LinkHitArea(this.hits);
+
+  /// 画布上的这个位置算不算点中了连线。
+  final bool Function(Offset position) hits;
+
+  @override
+  void paint(Canvas canvas, Size size) {}
+
+  @override
+  bool hitTest(Offset position) => hits(position);
+
+  @override
+  bool shouldRepaint(_LinkHitArea oldDelegate) => false;
+}
+
+/// 圆形的 ✂️ 图标：断开连线。
+class _Scissors extends StatelessWidget {
+  const _Scissors();
+
+  /// 直径（逻辑像素）。
+  static const size = 32.0;
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.square(
+    dimension: size,
+    child: DecoratedBox(
+      decoration: BoxDecoration(
+        color: PlannerTheme.accent,
+        shape: BoxShape.circle,
+        boxShadow: PlannerTheme.cardShadow,
+      ),
+      child: Icon(Icons.content_cut, size: 18, color: Colors.white),
+    ),
+  );
 }
 
 /// 卡片菜单里的操作。
