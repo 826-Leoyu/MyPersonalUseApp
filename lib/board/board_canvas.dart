@@ -224,16 +224,17 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
   @override
   void didUpdateWidget(BoardCanvas oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final cards = {for (final c in widget.board.cards) c.id: c};
+    final oldCards = {for (final c in oldWidget.board.cards) c.id: c};
     // 保存好的位置从数据库回来了，不再需要临时的位置。
     if (_dropping case (:final cardId, :final position)) {
-      final card = widget.board.cards.where((c) => c.id == cardId).firstOrNull;
+      final card = cards[cardId];
       if (card == null || Offset(card.x, card.y) == position) _dropping = null;
     }
     // 保存好的大小从数据库回来了，不再需要临时的大小。正按着手柄的卡片除外。
-    final oldCards = {for (final c in oldWidget.board.cards) c.id: c};
     _resizing.removeWhere((cardId, _) {
       if (cardId == _resizeHandleCardId) return false;
-      final card = widget.board.cards.where((c) => c.id == cardId).firstOrNull;
+      final card = cards[cardId];
       return card == null || !identical(card, oldCards[cardId]);
     });
   }
@@ -269,6 +270,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
       ...cards.where((c) => c.id != lifted?.cardId),
       ...cards.where((c) => c.id == lifted?.cardId),
     ];
+    // 卡片现在在画布上占的矩形，算上临时的位置和大小。卡片和连线都按它画。
     final boxes = <String, CardBox>{
       for (final card in cards)
         card.id: (
@@ -322,15 +324,12 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas> {
                         selection is EditingCard && selection.cardId == card.id
                         ? selection
                         : null,
-                    liftedPosition: card.id == lifted?.cardId
-                        ? lifted!.position
-                        : null,
+                    box: boxes[card.id]!,
                     onTap: () => _save(() => _selection.tapCard(card)),
                     onDragPointer: (event) => _onCardPointer(card, event),
                     onDragCancel: _onCardDragCancel,
                     onMenu: (global) => _openCardMenu(card, global),
                     globalToCanvas: _globalToCanvas,
-                    resizing: _resizing[card.id],
                     onResizeStart: () => _resizeHandleCardId = card.id,
                     onResizeUpdate: (size) => _onResizeUpdate(card, size),
                     onResizeEnd: () => _onResizeEnd(card),
@@ -386,13 +385,12 @@ class _CardView extends StatefulWidget {
     required this.card,
     required this.selected,
     required this.editing,
-    required this.liftedPosition,
+    required this.box,
     required this.onTap,
     required this.onDragPointer,
     required this.onDragCancel,
     required this.onMenu,
     required this.globalToCanvas,
-    required this.resizing,
     required this.onResizeStart,
     required this.onResizeUpdate,
     required this.onResizeEnd,
@@ -404,8 +402,8 @@ class _CardView extends StatefulWidget {
   /// 正在编辑这张卡片时不为 null，卡片上显示编辑框。
   final EditingCard? editing;
 
-  /// 拖动中或者刚拖完还没保存好时，卡片左上角的临时位置；平时为 null。
-  final Offset? liftedPosition;
+  /// 卡片现在在画布上占的矩形，包括拖动、调整大小时的临时位置和大小。
+  final CardBox box;
 
   final VoidCallback onTap;
 
@@ -421,9 +419,6 @@ class _CardView extends StatefulWidget {
   /// 把屏幕坐标换算成画布坐标。
   final Offset Function(Offset global) globalToCanvas;
 
-  /// 正在拖手柄、或者刚拖完还没保存好时的大小；平时为 null，用卡片自己的大小。
-  final Size? resizing;
-
   /// 按下手柄、拖动手柄（[size] 是新的大小，已经限制在上下限以内）、松开手柄。
   final VoidCallback onResizeStart;
   final void Function(Size size) onResizeUpdate;
@@ -438,9 +433,8 @@ class _CardViewState extends State<_CardView> {
   Offset _grabOffset = Offset.zero;
 
   Offset get _corner {
-    final card = widget.card;
-    final size = widget.resizing ?? Size(card.width, card.height);
-    return Offset(card.x + size.width, card.y + size.height);
+    final box = widget.box;
+    return Offset(box.x + box.width, box.y + box.height);
   }
 
   void _onResizeStart(DragStartDetails details) {
@@ -449,12 +443,12 @@ class _CardViewState extends State<_CardView> {
   }
 
   void _onResizeUpdate(DragUpdateDetails details) {
-    final card = widget.card;
+    final box = widget.box;
     final corner = widget.globalToCanvas(details.globalPosition) - _grabOffset;
     widget.onResizeUpdate(
       Size(
-        (corner.dx - card.x).clamp(TaskCard.minWidth, TaskCard.maxWidth),
-        (corner.dy - card.y).clamp(TaskCard.minHeight, TaskCard.maxHeight),
+        (corner.dx - box.x).clamp(TaskCard.minWidth, TaskCard.maxWidth),
+        (corner.dy - box.y).clamp(TaskCard.minHeight, TaskCard.maxHeight),
       ),
     );
   }
@@ -470,10 +464,10 @@ class _CardViewState extends State<_CardView> {
     final onMenu = editing == null ? widget.onMenu : null;
     return Positioned(
       key: BoardCanvas.cardKey(card.id),
-      left: widget.liftedPosition?.dx ?? card.x,
-      top: widget.liftedPosition?.dy ?? card.y,
-      width: widget.resizing?.width ?? card.width,
-      height: widget.resizing?.height ?? card.height,
+      left: widget.box.x,
+      top: widget.box.y,
+      width: widget.box.width,
+      height: widget.box.height,
       child: GestureDetector(
         onTap: widget.onTap,
         // 双击卡片是「完成」，由 #20 接上。现在就注册双击，单击从一开始
