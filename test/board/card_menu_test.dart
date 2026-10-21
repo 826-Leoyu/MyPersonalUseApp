@@ -1,6 +1,7 @@
 import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:my_personal_use_app/board/board_canvas.dart';
@@ -140,6 +141,154 @@ void main() {
     expect(tester.getRect(cardFinder(card)), before);
     expect(handleFinder(card), findsNothing);
     expect(find.byType(TextField), findsNothing);
+
+    await harness.dispose(tester);
+  });
+
+  /// 现在选中的是 [card]。
+  void expectSelected(WidgetTester tester, TaskCard card) => expect(
+    selection(tester),
+    isA<CardSelected>().having((s) => s.cardId, 'cardId', card.id),
+  );
+
+  /// 单击卡片选中它。
+  Future<void> selectCard(WidgetTester tester, TaskCard card) async {
+    await tester.tap(cardFinder(card));
+    await tester.pump(kDoubleTapTimeout);
+    await harness.settle(tester);
+    expect(selection(tester), isA<CardSelected>());
+    expect(handleFinder(card), findsOneWidget);
+  }
+
+  /// 按 Esc 关掉菜单，什么也不选。
+  Future<void> dismissMenu(WidgetTester tester) async {
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await harness.settle(tester);
+    expect(find.text('改颜色'), findsNothing);
+  }
+
+  group('已选中的卡片弹出菜单后仍然选中', () {
+    testWidgets('长按', (tester) async {
+      final card = await seedCard(tester);
+      await harness.launch(tester);
+      await selectCard(tester, card);
+
+      await longPressCard(tester, card);
+
+      expectMenuShown();
+      expectSelected(tester, card);
+      await dismissMenu(tester);
+      expectSelected(tester, card);
+      expect(handleFinder(card), findsOneWidget);
+
+      await harness.dispose(tester);
+    });
+
+    testWidgets('右键', (tester) async {
+      final card = await seedCard(tester);
+      await harness.launch(tester);
+      await selectCard(tester, card);
+
+      await tester.tap(
+        cardFinder(card),
+        kind: PointerDeviceKind.mouse,
+        buttons: kSecondaryMouseButton,
+      );
+      await tester.pump(kDoubleTapTimeout);
+      await harness.settle(tester);
+
+      expectMenuShown();
+      expectSelected(tester, card);
+      await dismissMenu(tester);
+      expectSelected(tester, card);
+      expect(handleFinder(card), findsOneWidget);
+      expect(find.byType(TextField), findsNothing);
+
+      await harness.dispose(tester);
+    });
+
+    testWidgets('选中另一张卡片时长按这张：还是选中那张', (tester) async {
+      final first = await seedCard(tester);
+      final second = await seedCard(tester, title: '回邮件', x: 400);
+      await harness.launch(tester);
+      await selectCard(tester, first);
+
+      await longPressCard(tester, second);
+      await dismissMenu(tester);
+
+      expectSelected(tester, first);
+      expect(handleFinder(first), findsOneWidget);
+      expect(handleFinder(second), findsNothing);
+
+      await harness.dispose(tester);
+    });
+  });
+
+  group('长按不算双击', () {
+    testWidgets('长按关掉菜单后马上单击卡片：是单击，选中卡片', (tester) async {
+      final card = await seedCard(tester);
+      await harness.launch(tester);
+
+      // 长按松手后不等双击判定时间，马上关菜单、单击。
+      await tester.longPress(cardFinder(card));
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      await tester.tap(cardFinder(card));
+      await tester.pump(kDoubleTapTimeout);
+      await harness.settle(tester);
+
+      expectSelected(tester, card);
+      expect(handleFinder(card), findsOneWidget);
+
+      await harness.dispose(tester);
+    });
+
+    testWidgets('单击空白处后马上长按旁边的卡片：弹出菜单，不新建卡片', (tester) async {
+      final card = await seedCard(tester);
+      await harness.launch(tester);
+      final rect = tester.getRect(cardFinder(card));
+
+      // 点在卡片左边一点的空白处，和长按的位置离得够近，能凑成双击。
+      await tester.tapAt(rect.centerLeft - const Offset(20, 0));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.longPressAt(rect.centerLeft + const Offset(20, 0));
+      await tester.pump(kDoubleTapTimeout);
+      await harness.settle(tester);
+
+      expectMenuShown();
+      expect(find.widgetWithText(TextField, '标题'), findsNothing);
+      expect(selection(tester), isA<NothingSelected>());
+      final board = await harness.readBoard(tester, harness.today);
+      expect(board.cards.map((c) => c.id), [card.id]);
+
+      await harness.dispose(tester);
+    });
+  });
+
+  testWidgets('长按时手指在判定距离以内轻微移动：仍然弹出菜单，卡片不动，画布不平移', (tester) async {
+    final card = await seedCard(tester);
+    final other = await seedCard(tester, title: '回邮件', x: 400);
+    await harness.launch(tester);
+    final before = tester.getRect(cardFinder(card));
+    final otherBefore = tester.getRect(cardFinder(other));
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(cardFinder(card)),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    await gesture.moveBy(const Offset(3, 2));
+    await tester.pump(const Duration(milliseconds: 500));
+    await gesture.up();
+    await tester.pump(kDoubleTapTimeout);
+    await harness.settle(tester);
+
+    expectMenuShown();
+    expect(tester.getRect(cardFinder(card)), before);
+    expect(tester.getRect(cardFinder(other)), otherBefore);
+    expect(selection(tester), isA<NothingSelected>());
+    final saved = await savedCard(tester, card);
+    expect((saved.x, saved.y), (card.x, card.y));
 
     await harness.dispose(tester);
   });
@@ -321,15 +470,27 @@ void main() {
       await harness.dispose(tester);
     });
 
-    testWidgets('正在编辑的卡片长按不弹菜单', (tester) async {
+    testWidgets('正在编辑的卡片长按、右键都不弹菜单', (tester) async {
       final card = await seedCard(tester);
       await harness.launch(tester);
       await chooseFromMenu(tester, card, '编辑');
+      // 按在卡片左下角的内边距上，不按在编辑框上，免得被编辑框抢去选文字。
+      final padding =
+          tester.getRect(cardFinder(card)).bottomLeft + const Offset(6, -6);
 
-      await tester.longPress(cardFinder(card), warnIfMissed: false);
+      await tester.longPressAt(padding);
       await harness.settle(tester);
-
       expect(find.text('改颜色'), findsNothing);
+
+      await tester.tapAt(
+        padding,
+        kind: PointerDeviceKind.mouse,
+        buttons: kSecondaryMouseButton,
+      );
+      await tester.pump(kDoubleTapTimeout);
+      await harness.settle(tester);
+      expect(find.text('改颜色'), findsNothing);
+      expect(find.widgetWithText(TextField, '买牛奶'), findsOneWidget);
 
       await harness.dispose(tester);
     });
@@ -338,9 +499,12 @@ void main() {
       await harness.launch(tester);
       await tester.tap(find.byTooltip('新建卡片'));
       await harness.settle(tester);
-      final draft = tester.getRect(find.widgetWithText(TextField, '标题'));
+      final title = tester.getRect(find.widgetWithText(TextField, '标题'));
+      // 按在草稿卡片左下角的内边距上，不按在编辑框上。
+      final padding =
+          title.topLeft + const Offset(-6, TaskCard.defaultHeight - 12 - 6);
 
-      await tester.longPressAt(draft.center + const Offset(0, 30));
+      await tester.longPressAt(padding);
       await harness.settle(tester);
 
       expect(find.text('改颜色'), findsNothing);
