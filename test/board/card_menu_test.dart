@@ -293,6 +293,40 @@ void main() {
     await harness.dispose(tester);
   });
 
+  group('开始拖动后停住也不弹菜单', () {
+    for (final (kind, distance) in [
+      (PointerDeviceKind.touch, 60.0),
+      // 鼠标的拖动判定距离比长按允许的移动范围小得多，挪一点就是拖动。
+      (PointerDeviceKind.mouse, 10.0),
+    ]) {
+      testWidgets('${kind.name}：拖动 $distance 后停住 700ms', (tester) async {
+        final card = await seedCard(tester);
+        await harness.launch(tester);
+        final before = tester.getRect(cardFinder(card));
+
+        final gesture = await tester.startGesture(
+          tester.getCenter(cardFinder(card)),
+          kind: kind,
+        );
+        await gesture.moveBy(Offset(distance / 2, 0));
+        await gesture.moveBy(Offset(distance / 2, 0));
+        await tester.pump(const Duration(milliseconds: 700));
+        expect(find.text('改颜色'), findsNothing);
+        await gesture.up();
+        await tester.pump(kDoubleTapTimeout);
+        await harness.settle(tester);
+
+        expect(find.text('改颜色'), findsNothing);
+        expect(
+          tester.getRect(cardFinder(card)),
+          before.shift(Offset(distance, 0)),
+        );
+
+        await harness.dispose(tester);
+      });
+    }
+  });
+
   group('改颜色', () {
     testWidgets('色板有 8 种预设色和「自定义」', (tester) async {
       final card = await seedCard(tester);
