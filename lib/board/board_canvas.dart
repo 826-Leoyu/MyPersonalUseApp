@@ -77,7 +77,13 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
   Offset? _doubleTapPosition;
 
   /// 拖动卡片的状态机，和正在拖卡片的指针。
-  final _drag = CardDragMachine();
+  late final _drag = CardDragMachine(
+    isLinked: (cardId, otherId) => widget.board.links.any(
+      (l) =>
+          (l.fromCardId == cardId && l.toCardId == otherId) ||
+          (l.fromCardId == otherId && l.toCardId == cardId),
+    ),
+  );
   int? _dragPointerId;
 
   /// 给拖动状态机计时。测试里跟着假时间走。
@@ -378,18 +384,13 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     }
   }
 
-  /// 准备连线时的预览，画在卡片上面：没连上时是一条虚线，已经连上时在两张
-  /// 卡片之间显示 ✂️。
+  /// 准备连线时的预览，画在卡片上面：连线时是一条虚线，断开时在两张卡片之间
+  /// 显示 ✂️。
   List<Widget> _armedPreview(CardArmed armed, Map<String, CardBox> boxes) {
     final (from, to) = (boxes[armed.cardId], boxes[armed.targetId]);
     if (from == null || to == null) return const [];
     final curve = linkCurve(from, to);
-    final linked = widget.board.links.any(
-      (l) =>
-          (l.fromCardId == armed.cardId && l.toCardId == armed.targetId) ||
-          (l.fromCardId == armed.targetId && l.toCardId == armed.cardId),
-    );
-    if (!linked) {
+    if (armed.action == LinkAction.link) {
       return [
         Positioned.fill(
           child: IgnorePointer(

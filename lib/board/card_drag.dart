@@ -4,6 +4,9 @@
 ///
 /// 长按由卡片上的 Flutter 长按手势判定，它胜出时拖动被取消
 /// （[CardDragMachine.cancel]），不经过这里。
+///
+/// 碰撞只看画布上的卡片。底部投放区（#20）要优先于卡片碰撞，画布上的历史
+/// 记录（#21）不参与碰撞，由那两个任务接上。
 library;
 
 import 'dart:math' as math;
@@ -87,18 +90,26 @@ final class CardHovering extends CardDragging {
   final Duration since;
 }
 
+/// 松手时对两张卡片做什么：没连上就连线，已经连上（任一方向）就断开。
+enum LinkAction { link, unlink }
+
 /// 指针在另一张卡片上停满了 [CardDragMachine.armDelay]：松手就连线或断开。
 final class CardArmed extends CardDragging {
-  CardArmed(CardDragging dragging, {required this.targetId})
-    : super(
-        cardId: dragging.cardId,
-        origin: dragging.origin,
-        position: dragging.position,
-        grab: dragging.grab,
-      );
+  CardArmed(
+    CardDragging dragging, {
+    required this.targetId,
+    required this.action,
+  }) : super(
+         cardId: dragging.cardId,
+         origin: dragging.origin,
+         position: dragging.position,
+         grab: dragging.grab,
+       );
 
   /// 要连上或断开的那张卡片。
   final String targetId;
+
+  final LinkAction action;
 }
 
 /// 拖动后松手的结果。
@@ -131,6 +142,11 @@ final class CardLinkToggled extends CardRelease {
 
 /// 驱动拖动状态：输入指针的位置和时间，输出 [state]。
 class CardDragMachine {
+  /// [isLinked] 判断两张卡片之间现在有没有连线（任一方向）。
+  CardDragMachine({required this.isLinked});
+
+  final bool Function(String cardId, String otherId) isLinked;
+
   /// 指针在另一张卡片上停这么久进入 [CardArmed]。
   static const armDelay = Duration(milliseconds: 400);
 
@@ -166,8 +182,8 @@ class CardDragMachine {
   /// 占的矩形），按从下到上的顺序，用来判断指针停在哪张卡片上。
   void move(
     Offset pointer, {
-    Map<String, CardBox> cards = const {},
-    Duration now = Duration.zero,
+    required Map<String, CardBox> cards,
+    required Duration now,
   }) {
     final dragging = switch (_state) {
       final CardPressed pressed
@@ -191,10 +207,8 @@ class CardDragMachine {
     // 还在同一张卡片上：接着计时，或者保持 armed；换了卡片重新计时。
     _state = switch (_state) {
       _ when targetId == null => dragging,
-      CardArmed(targetId: final armed) when armed == targetId => CardArmed(
-        dragging,
-        targetId: targetId,
-      ),
+      CardArmed(targetId: final armed, :final action) when armed == targetId =>
+        CardArmed(dragging, targetId: targetId, action: action),
       CardHovering(targetId: final hovered, :final since)
           when hovered == targetId =>
         CardHovering(dragging, targetId: targetId, since: since),
@@ -207,7 +221,13 @@ class CardDragMachine {
   void tick(Duration now) {
     if (_state case final CardHovering hovering
         when now - hovering.since >= armDelay) {
-      _state = CardArmed(hovering, targetId: hovering.targetId);
+      _state = CardArmed(
+        hovering,
+        targetId: hovering.targetId,
+        action: isLinked(hovering.cardId, hovering.targetId)
+            ? LinkAction.unlink
+            : LinkAction.link,
+      );
     }
   }
 

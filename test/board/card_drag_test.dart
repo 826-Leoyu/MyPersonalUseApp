@@ -19,14 +19,19 @@ void main() {
   /// 在目标卡片里面的一个指针位置。
   const onTarget = Offset(450, 230);
 
-  CardDragMachine pressed() =>
-      CardDragMachine()
+  /// 按在 card-1 上还没开始拖。[linked] 是已经连着的两张卡片（任一方向）。
+  CardDragMachine pressed({(String, String)? linked}) =>
+      CardDragMachine(isLinked: (a, b) => linked == (a, b) || linked == (b, a))
         ..down('card-1', origin: origin, pointer: press, slop: slop);
 
   test('移动超过判定距离就开始拖动，卡片跟着指针走', () {
     final machine = pressed();
 
-    machine.move(press + const Offset(30, 40));
+    machine.move(
+      press + const Offset(30, 40),
+      cards: cards,
+      now: Duration.zero,
+    );
 
     expect(
       machine.state,
@@ -37,9 +42,14 @@ void main() {
   });
 
   test('拖动中继续移动，卡片位置跟着更新', () {
-    final machine = pressed()..move(press + const Offset(30, 40));
+    final machine = pressed()
+      ..move(press + const Offset(30, 40), cards: cards, now: Duration.zero);
 
-    machine.move(press + const Offset(-50, 10));
+    machine.move(
+      press + const Offset(-50, 10),
+      cards: cards,
+      now: Duration.zero,
+    );
 
     expect(
       machine.state,
@@ -52,7 +62,8 @@ void main() {
   });
 
   test('拖动后松手，给出卡片要移到的位置，回到 idle', () {
-    final machine = pressed()..move(press + const Offset(30, 40));
+    final machine = pressed()
+      ..move(press + const Offset(30, 40), cards: cards, now: Duration.zero);
 
     final release = machine.up();
 
@@ -69,7 +80,11 @@ void main() {
   test('卡片不会拖到画布左上角以外，坐标最小是 0', () {
     final machine = pressed();
 
-    machine.move(press + const Offset(-500, -40));
+    machine.move(
+      press + const Offset(-500, -40),
+      cards: cards,
+      now: Duration.zero,
+    );
 
     expect(
       machine.state,
@@ -82,7 +97,8 @@ void main() {
   });
 
   test('拖动被取消时回到 idle，松手不移动卡片', () {
-    final machine = pressed()..move(press + const Offset(30, 40));
+    final machine = pressed()
+      ..move(press + const Offset(30, 40), cards: cards, now: Duration.zero);
 
     machine.cancel();
 
@@ -91,7 +107,8 @@ void main() {
   });
 
   test('指针进入另一张卡片就开始悬停，卡片仍然跟着指针走', () {
-    final machine = pressed()..move(press + const Offset(30, 40));
+    final machine = pressed()
+      ..move(press + const Offset(30, 40), cards: cards, now: Duration.zero);
 
     machine.move(onTarget, cards: cards, now: Duration.zero);
 
@@ -104,9 +121,10 @@ void main() {
   });
 
   /// 已经拖到目标卡片上、在 [Duration.zero] 开始悬停。
-  CardDragMachine hovering() => pressed()
-    ..move(press + const Offset(30, 40))
-    ..move(onTarget, cards: cards, now: Duration.zero);
+  CardDragMachine hovering({(String, String)? linked}) =>
+      pressed(linked: linked)
+        ..move(press + const Offset(30, 40), cards: cards, now: Duration.zero)
+        ..move(onTarget, cards: cards, now: Duration.zero);
 
   test('在同一张卡片上移动不重新计时，停满 400ms 进入 armed', () {
     final machine = hovering()
@@ -124,6 +142,7 @@ void main() {
       machine.state,
       isA<CardArmed>()
           .having((s) => s.targetId, 'targetId', 'card-2')
+          .having((s) => s.action, 'action', LinkAction.link)
           .having(
             (s) => s.position,
             'position',
@@ -160,7 +179,8 @@ void main() {
   });
 
   test('停在被拖卡片自己下面不算碰到卡片', () {
-    final machine = pressed()..move(press + const Offset(30, 40));
+    final machine = pressed()
+      ..move(press + const Offset(30, 40), cards: cards, now: Duration.zero);
 
     machine.move(
       press + const Offset(40, 40),
@@ -200,5 +220,15 @@ void main() {
           .having((r) => r.origin, 'origin', origin),
     );
     expect(machine.state, isA<CardDragIdle>());
+  });
+
+  test('两张卡片已经连着（任一方向）时，armed 的动作是断开', () {
+    final machine = hovering(linked: ('card-2', 'card-1'))
+      ..tick(CardDragMachine.armDelay);
+
+    expect(
+      machine.state,
+      isA<CardArmed>().having((s) => s.action, 'action', LinkAction.unlink),
+    );
   });
 }
