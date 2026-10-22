@@ -1,7 +1,8 @@
 import 'package:drift/drift.dart';
 
-/// 只用来模拟存储失败，不用来验证调用次数；计数只用来决定从第几次写入开始失败。
-class FailingWrites extends QueryInterceptor {
+/// 模拟存储的读写失败，只用来模拟失败，不用来验证调用次数；计数只用来决定
+/// 从第几次写入开始失败。
+class FailingStorage extends QueryInterceptor {
   /// 还允许成功的写入次数；为 null 时不模拟失败。
   int? writesBeforeFailure;
 

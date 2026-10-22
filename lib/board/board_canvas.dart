@@ -661,7 +661,8 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
   @override
   void initState() {
     super.initState();
-    // 点历史记录跳过来时，卡片已经选中了：等画布排好版，让它露出来。
+    // 点历史记录跳到另一天时，画布按 ValueKey(day) 重建，这时卡片已经选中了：
+    // 等画布排好版，让它露出来。
     if (ref.read(boardSelectionProvider) case CardSelected(:final cardId)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _revealCard(cardId);
@@ -740,6 +741,9 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     )) {
       return;
     }
+    // 卡片就在这一天时画布不会重建，在这里让它露出来；换了一天的由新画布
+    // 的 initState 处理。
+    if (jump == CarryOverJump.selected && mounted) _revealCard(record.cardId);
     final message = switch (jump) {
       CarryOverJump.selected => null,
       CarryOverJump.completed => '该任务已完成',
@@ -1408,7 +1412,6 @@ class _HeightLimitedText extends StatelessWidget {
   }
 }
 
-/// 选中的卡片右下角调整大小的手柄。
 /// 顺延过的卡片右上角的「顺延」标记。
 class _CarriedOverTag extends StatelessWidget {
   const _CarriedOverTag({super.key, required this.textColor});
@@ -1434,6 +1437,7 @@ class _CarriedOverTag extends StatelessWidget {
   }
 }
 
+/// 选中的卡片右下角调整大小的手柄。
 class _ResizeHandle extends StatelessWidget {
   const _ResizeHandle();
 

@@ -6,7 +6,7 @@ import 'package:my_personal_use_app/planner/planner_service.dart';
 import 'package:my_personal_use_app/storage/planner_database.dart';
 import 'package:sqlite3/sqlite3.dart';
 
-import '../support/failing_writes.dart';
+import '../support/failing_storage.dart';
 
 /// 切入点 1 的测试环境：真实的 [PlannerService] + 内存 SQLite + 假时钟。
 ///
@@ -17,7 +17,7 @@ class PlannerHarness {
   }
 
   final Database _sqlite;
-  final _failingWrites = FailingWrites();
+  final _failingStorage = FailingStorage();
   late PlannerDatabase _database;
   late PlannerService service;
 
@@ -28,20 +28,21 @@ class PlannerHarness {
 
   /// 打开后，所有写入都会报错；读取不受影响。
   set failWrites(bool value) =>
-      _failingWrites.writesBeforeFailure = value ? 0 : null;
+      _failingStorage.writesBeforeFailure = value ? 0 : null;
 
   /// 打开后所有读取都会报错。
-  set failReads(bool value) => _failingWrites.failReads = value;
+  set failReads(bool value) => _failingStorage.failReads = value;
 
   /// 之后的 [count] 次写入成功，再往后的写入都报错，用来模拟事务中途失败。
-  void failWritesAfter(int count) => _failingWrites.writesBeforeFailure = count;
+  void failWritesAfter(int count) =>
+      _failingStorage.writesBeforeFailure = count;
 
   void _open() {
     _database = PlannerDatabase(
       NativeDatabase.opened(
         _sqlite,
         closeUnderlyingOnClose: false,
-      ).interceptWith(_failingWrites),
+      ).interceptWith(_failingStorage),
     );
     service = PlannerService(database: _database, clock: Clock(() => now));
   }

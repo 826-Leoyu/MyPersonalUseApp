@@ -389,6 +389,24 @@ void main() {
       await harness.dispose(tester);
     });
 
+    testWidgets('点在历史记录旁边的空白处：不跳转', (tester) async {
+      await seedCard(tester);
+      final record = (await carryOverToNextDay(tester)).single;
+      harness.displayedDay = yesterday;
+      await harness.launch(tester);
+
+      await tester.tapAt(
+        tester.getRect(recordFinder(record)).centerRight + const Offset(20, 0),
+      );
+      await tester.pump(kDoubleTapTimeout);
+      await harness.settle(tester);
+
+      expect(titleOf('Tue, Oct 20, 2026'), findsOneWidget);
+      expect(recordFinder(record), findsOneWidget);
+
+      await harness.dispose(tester);
+    });
+
     testWidgets('连线从历史记录下面穿过：点在记录上算点历史记录，跳转，不选中连线', (tester) async {
       final (record, _, _, _) = await seedLinkUnderRecord(tester);
 
@@ -530,6 +548,32 @@ void main() {
       expect(shown.left - view.left, lessThanOrEqualTo(48));
       expect(shown.top - view.top, lessThanOrEqualTo(48));
       expect(shown.left - view.left, greaterThan(0));
+
+      await harness.dispose(tester);
+    });
+
+    testWidgets('卡片就在当前显示的这一天、在可视区域外：同样平移到能看见它', (tester) async {
+      final card = await seedCard(tester, x: 900, y: 500);
+      final record = (await carryOverToNextDay(tester)).single;
+      // 正常顺延不会出现这种情况，直接改数据库把卡片放回昨天。
+      await harness.moveCardToDay(tester, card.id, yesterday);
+      harness.displayedDay = yesterday;
+      await harness.launch(tester);
+      await pan(
+        tester,
+        viewport(tester).center,
+        const Offset(-400, -300),
+        recordFinder(record),
+      );
+      final view = viewport(tester);
+      expect(view.intersect(tester.getRect(cardFinder(card))).isEmpty, isTrue);
+
+      await tapRecord(tester, record);
+
+      expect(titleOf('Tue, Oct 20, 2026'), findsOneWidget);
+      expect(handleFinder(card), findsOneWidget);
+      final shown = tester.getRect(cardFinder(card));
+      expect(view.intersect(shown), shown);
 
       await harness.dispose(tester);
     });

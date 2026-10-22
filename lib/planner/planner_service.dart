@@ -666,19 +666,23 @@ class PlannerService {
   /// 卡片当前的日期、状态、是否在回收站；找不到时抛出 [NotFound]，
   /// 存储读取失败时抛出 [StorageFailure]。
   Future<CardLocation> findCard(String id) async {
-    final TaskCard card;
-    try {
-      card = await _requireCard(id);
-    } on PlannerException {
-      rethrow;
-    } on Exception catch (e) {
-      throw StorageFailure('读取失败', e);
-    }
+    final card = await _read(() => _requireCard(id));
     return CardLocation(
       dayKey: card.dayKey,
       status: card.status,
       inTrash: card.deletedAt != null,
     );
+  }
+
+  /// 执行读操作。存储报错时抛出 [StorageFailure]；业务错误原样抛出。
+  Future<T> _read<T>(Future<T> Function() action) async {
+    try {
+      return await action();
+    } on PlannerException {
+      rethrow;
+    } on Exception catch (e) {
+      throw StorageFailure('读取失败', e);
+    }
   }
 
   /// 在一个事务里执行写操作。存储报错时事务整体回滚，并抛出 [StorageFailure]；
