@@ -192,15 +192,15 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
             case EditingCard(cardId: final editing) when editing == cardId) {
           return;
         }
-        if (widget.board.cards.where((c) => c.id == cardId).firstOrNull
-            case final card?) {
+        if (_boardCard(cardId) case final card?) {
           _finishCard(card, DropZone.complete);
         }
         return;
       case null:
     }
     final position = _doubleTapPosition;
-    if (position == null) return;
+    // 过去的日期不能新建卡片。
+    if (position == null || !widget.canCreateCards) return;
     _save(() => _selection.newCardAt(_transform.toScene(position)));
   }
 
@@ -385,6 +385,10 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     };
   }
 
+  /// 数据库的画布内容里 ID 为 [cardId] 的卡片；没有时为 null。
+  TaskCard? _boardCard(String cardId) =>
+      widget.board.cards.where((c) => c.id == cardId).firstOrNull;
+
   /// 画布上显示的卡片：去掉已经退场的，加上数据库里已经没有、退场动画还没
   /// 播完的。
   List<TaskCard> _shownCards() {
@@ -410,6 +414,9 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     CardDropped? dropped,
   }) async {
     if (_leaving.containsKey(card.id)) return;
+    // 保存期间画布可能被换掉（比如切换了日期），撤销提示不依赖画布还在。
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final container = ProviderScope.containerOf(context, listen: false);
     setState(
       () =>
           _leaving[card.id] = _Leaving(card, at: dropped?.releasedAt)
@@ -421,17 +428,22 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
         DropZone.trash => _selection.deleteCard(card.id),
       },
     );
-    if (!mounted) return;
-    if (!saved) return _returnCard(card.id, dropped);
-    if (action == DropZone.trash) _showUndoDelete(card);
+    if (!saved) {
+      if (mounted) _returnCard(card.id, dropped);
+      return;
+    }
+    if (action == DropZone.trash && messenger != null) {
+      _showUndoDelete(card, messenger, container);
+    }
   }
 
   /// 删除成功后的撤销提示：点「撤销」把卡片从回收站拿回来。新的提示顶替
   /// 旧的，每个提示只恢复自己那张卡片。
-  void _showUndoDelete(TaskCard card) {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    if (messenger == null) return;
-    final service = ref.read(plannerServiceProvider.future);
+  void _showUndoDelete(
+    TaskCard card,
+    ScaffoldMessengerState messenger,
+    ProviderContainer container,
+  ) {
     messenger
       ..hideCurrentSnackBar()
       ..showSnackBar(
@@ -442,24 +454,32 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
           persist: false,
           action: SnackBarAction(
             label: '撤销',
-            onPressed: () => _undoDelete(card, service, messenger),
+            onPressed: () => _undoDelete(card, messenger, container),
           ),
         ),
       );
   }
 
-  /// 点了撤销提示上的「撤销」。画布可能已经换了一天，所以不依赖画布还在。
-  /// 卡片原来的日期已经过去、恢复时被顺延到今天的，另外提示一下。
+  /// 点了撤销提示上的「撤销」。画布可能已经换了一天、存储也可能重新打开过，
+  /// 所以不依赖画布还在，用的是当前的 service。卡片原来的日期已经过去、
+  /// 恢复时被顺延到今天的，另外提示一下。
   Future<void> _undoDelete(
     TaskCard card,
-    Future<PlannerService> service,
     ScaffoldMessengerState messenger,
+    ProviderContainer container,
   ) async {
-    if (mounted) setState(() => _leaving.remove(card.id));
+    final PlannerService service;
     try {
-      final planner = await service;
-      await planner.restoreCard(card.id);
-      final location = await planner.findCard(card.id);
+      service = await container.read(plannerServiceProvider.future);
+      await service.restoreCard(card.id);
+    } on PlannerException {
+      messenger.showSnackBar(const SnackBar(content: Text('恢复失败，请重试')));
+      return;
+    }
+    if (mounted) setState(() => _leaving.remove(card.id));
+    // 已经恢复成功；查不到现在的日期只是少一条提示，不算恢复失败。
+    try {
+      final location = await service.findCard(card.id);
       if (location.dayKey != card.dayKey) {
         messenger.showSnackBar(
           SnackBar(
@@ -468,7 +488,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
         );
       }
     } on PlannerException {
-      messenger.showSnackBar(const SnackBar(content: Text('恢复失败，请重试')));
+      return;
     }
   }
 
@@ -489,9 +509,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
 
   /// 在投放区里松手：完成或删除卡片。
   void _dropCard(CardDropped dropped) {
-    final card = widget.board.cards
-        .where((c) => c.id == dropped.cardId)
-        .firstOrNull;
+    final card = _boardCard(dropped.cardId);
     if (card == null) return setState(() {});
     _finishCard(card, dropped.zone, dropped: dropped);
   }
@@ -502,7 +520,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     if (leaving == null) return;
     setState(() {
       leaving.gone = true;
-      if (!widget.board.cards.any((c) => c.id == cardId)) {
+      if (_boardCard(cardId) == null) {
         _leaving.remove(cardId);
       }
     });
@@ -716,10 +734,10 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => _save(_selection.tapBlank),
-        onDoubleTapDown: widget.canCreateCards
-            ? (details) => _doubleTapPosition = details.localPosition
-            : null,
-        onDoubleTap: widget.canCreateCards ? _onDoubleTapBlank : null,
+        // 过去的日期上也要接住双击：第一下点在连线或卡片上时要认出来。
+        onDoubleTapDown: (details) =>
+            _doubleTapPosition = details.localPosition,
+        onDoubleTap: _onDoubleTapBlank,
         child: InteractiveViewer(
           transformationController: _transform,
           constrained: false,

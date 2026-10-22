@@ -109,6 +109,24 @@ void main() {
       await harness.dispose(tester);
     });
 
+    testWidgets('过去的日期上第一下点卡片、第二下偏出：同样完成这张卡片（#50）', (tester) async {
+      final card = await seedCard(tester);
+      await harness.moveCardToDay(tester, card.id, harness.today.addDays(-1));
+      harness.displayedDay = harness.today.addDays(-1);
+      await harness.launch(tester);
+      final rect = tester.getRect(cardFinder(card));
+
+      await tester.tapAt(rect.centerRight - const Offset(20, 0));
+      await tester.pump(kDoubleTapMinTime);
+      await tester.tapAt(rect.centerRight + const Offset(20, 0));
+      await harness.settle(tester);
+
+      expect(cardFinder(card), findsNothing);
+      expect((await locate(tester, card)).status, CardStatus.completed);
+
+      await harness.dispose(tester);
+    });
+
     testWidgets('正在编辑的卡片：在编辑框里双击不完成，仍在编辑', (tester) async {
       final card = await seedCard(tester);
       await harness.launch(tester);
@@ -468,6 +486,28 @@ void main() {
       final location = await locate(tester, card);
       expect(location.inTrash, isFalse);
       expect(location.dayKey, harness.today);
+
+      await harness.dispose(tester);
+    });
+
+    testWidgets('删除还在保存时切换了日期：保存成功后仍然显示撤销提示，点撤销卡片回来', (tester) async {
+      final card = await seedCard(tester);
+      await harness.launch(tester);
+
+      final gesture = await startDragging(tester, card);
+      await gesture.moveTo(tester.getCenter(zoneFinder(DropZone.trash)));
+      await tester.pump();
+      await gesture.up();
+      // 不等保存完成就换到前一天。
+      await harness.showDay(tester, harness.today.addDays(-1));
+      await harness.settle(tester);
+
+      expect(find.text('已移到回收站：『买牛奶』'), findsOneWidget);
+
+      await tapUndo(tester);
+
+      expect((await locate(tester, card)).inTrash, isFalse);
+      expect(find.text('恢复失败，请重试'), findsNothing);
 
       await harness.dispose(tester);
     });
