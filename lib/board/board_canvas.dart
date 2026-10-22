@@ -763,9 +763,8 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       return true;
     } on PlannerException catch (e) {
       if (mounted) {
-        final message = e is InvalidInput ? e.message : '保存失败，请重试';
         ScaffoldMessenger.maybeOf(context)
-            ?.showSnackBar(SnackBar(content: Text(message)));
+            ?.showSnackBar(SnackBar(content: Text(saveFailureMessage(e))));
       }
       return false;
     }
