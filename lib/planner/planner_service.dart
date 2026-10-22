@@ -663,9 +663,17 @@ class PlannerService {
       c.status.equalsValue(CardStatus.completed) &
       c.deletedAt.isNull();
 
-  /// 卡片当前的日期、状态、是否在回收站；找不到时抛出 [NotFound]。
+  /// 卡片当前的日期、状态、是否在回收站；找不到时抛出 [NotFound]，
+  /// 存储读取失败时抛出 [StorageFailure]。
   Future<CardLocation> findCard(String id) async {
-    final card = await _requireCard(id);
+    final TaskCard card;
+    try {
+      card = await _requireCard(id);
+    } on PlannerException {
+      rethrow;
+    } on Exception catch (e) {
+      throw StorageFailure('读取失败', e);
+    }
     return CardLocation(
       dayKey: card.dayKey,
       status: card.status,

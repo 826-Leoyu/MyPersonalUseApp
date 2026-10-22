@@ -34,7 +34,8 @@ class BoardHarness {
 
   DayKey get today => DayKey.fromDateTime(now);
 
-  /// 画布显示哪一天；为 null 时显示今天。日期栏做好之前，用它来测过去的日期。
+  /// App 启动时画布显示哪一天；为 null 时显示今天。日期栏做好之前，用它来测
+  /// 过去的日期。
   DayKey? displayedDay;
 
   /// 接下来这么多次打开存储都会报错，用来模拟数据库打不开。
@@ -43,6 +44,10 @@ class BoardHarness {
   /// 打开后，App 的所有写入都会报错；读取不受影响。
   set failWrites(bool value) =>
       _failingWrites.writesBeforeFailure = value ? 0 : null;
+
+  /// 打开后，App 的所有读取都会报错。只在画布已经显示出来以后打开，
+  /// 不然画布本身就读不出来。
+  set failReads(bool value) => _failingWrites.failReads = value;
 
   Clock get _clock => Clock(() => now);
 
@@ -120,8 +125,10 @@ class BoardHarness {
   /// App 运行中把画布切到 [day]，等那一天的画布内容显示出来，不推进动画的时间。
   /// 日期栏做好之前用它来测切换日期。
   Future<void> showDay(WidgetTester tester, DayKey day) async {
-    displayedDay = day;
-    await tester.pumpWidget(_app());
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(PlannerApp)),
+    );
+    container.read(displayedDayProvider.notifier).show(day);
     await pumpData(tester);
   }
 
@@ -129,7 +136,8 @@ class BoardHarness {
     overrides: [
       clockProvider.overrideWithValue(_clock),
       plannerDatabaseFactoryProvider.overrideWithValue(_openDatabase),
-      displayedDayProvider.overrideWithValue(displayedDay ?? today),
+      if (displayedDay case final day?)
+        displayedDayProvider.overrideWithBuild((ref, _) => day),
     ],
     child: const PlannerApp(),
   );

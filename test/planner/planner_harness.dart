@@ -30,6 +30,9 @@ class PlannerHarness {
   set failWrites(bool value) =>
       _failingWrites.writesBeforeFailure = value ? 0 : null;
 
+  /// 打开后所有读取都会报错。
+  set failReads(bool value) => _failingWrites.failReads = value;
+
   /// 之后的 [count] 次写入成功，再往后的写入都报错，用来模拟事务中途失败。
   void failWritesAfter(int count) => _failingWrites.writesBeforeFailure = count;
 

@@ -5,6 +5,19 @@ class FailingWrites extends QueryInterceptor {
   /// 还允许成功的写入次数；为 null 时不模拟失败。
   int? writesBeforeFailure;
 
+  /// 为 true 时所有读取都报错。
+  bool failReads = false;
+
+  @override
+  Future<List<Map<String, Object?>>> runSelect(
+    QueryExecutor executor,
+    String statement,
+    List<Object?> args,
+  ) {
+    if (failReads) throw Exception('模拟的读取失败');
+    return super.runSelect(executor, statement, args);
+  }
+
   void _countWriteOrThrow() {
     final remaining = writesBeforeFailure;
     if (remaining == null) return;

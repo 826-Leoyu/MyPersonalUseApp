@@ -8,6 +8,7 @@ import 'dart:ui';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/providers.dart';
+import '../planner/planner_exceptions.dart';
 import '../planner/task_card.dart';
 
 /// 画布上选中或正在编辑的对象。
@@ -65,13 +66,36 @@ final class EditingNewCard extends Editing {
   final double y;
 }
 
+/// 单击历史记录以后的结果。
+enum CarryOverJump {
+  /// 卡片还在画布上：跳到它所在的日期并选中了它。
+  selected,
+
+  /// 卡片已完成：跳到了它所在的日期，没有选中。
+  completed,
+
+  /// 卡片在回收站里：不跳转。
+  inTrash,
+
+  /// 卡片已经不存在：不跳转。
+  missing,
+
+  /// 读不出卡片现在在哪：不跳转。
+  unreadable,
+}
+
 /// 管理画布上的选中和编辑状态，把点击翻译成对 PlannerService 的调用。
 class BoardSelectionController extends Notifier<BoardSelection> {
   /// 正在进行的保存；保存完成前再次退出编辑时等它，不重复保存。
   Future<void>? _saving;
 
   @override
-  BoardSelection build() => const NothingSelected();
+  BoardSelection build() {
+    // 换一天时取消选中：选中和编辑都只属于当时显示的那一天。点历史记录
+    // 跳转时先换日期，再选中目标卡片。
+    ref.listen(displayedDayProvider, (_, _) => state = const NothingSelected());
+    return const NothingSelected();
+  }
 
   /// 单击卡片：没选中就选中它；已经选中就进入编辑；正在编辑它时不变。
   Future<void> tapCard(TaskCard card) async {
@@ -141,6 +165,32 @@ class BoardSelectionController extends Notifier<BoardSelection> {
         when selected == linkId) {
       state = const NothingSelected();
     }
+  }
+
+  /// 单击历史记录：先保存正在编辑的卡片，再按这张卡片现在的状态跳转，
+  /// 见 [CarryOverJump]。卡片现在在哪由存储里的真实状态决定，不看历史记录
+  /// 里的日期。
+  ///
+  /// 保存失败时抛出 PlannerException，仍然停在编辑状态，不跳转。
+  Future<CarryOverJump> openCarryOverRecord(String cardId) async {
+    await _finishEditing();
+    final service = await ref.read(plannerServiceProvider.future);
+    final CardLocation location;
+    try {
+      location = await service.findCard(cardId);
+    } on NotFound {
+      return CarryOverJump.missing;
+    } on StorageFailure {
+      return CarryOverJump.unreadable;
+    }
+    if (location.inTrash) return CarryOverJump.inTrash;
+    ref.read(displayedDayProvider.notifier).show(location.dayKey);
+    if (location.status == CardStatus.completed) {
+      state = const NothingSelected();
+      return CarryOverJump.completed;
+    }
+    state = CardSelected(cardId);
+    return CarryOverJump.selected;
   }
 
   /// 单击空白处：退出编辑并保存，取消选中。
