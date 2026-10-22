@@ -18,9 +18,12 @@ void main() {
   /// 另一块空白处，用来点空白处退出编辑或取消选中。
   const otherBlankSpot = Offset(700, 500);
 
+  /// 画布的可视区域，不含标题栏。
+  Finder viewport() => find.byType(InteractiveViewer);
+
   /// 屏幕上的 [point] 在画布上的坐标（画布没有平移和缩放时）。
   Offset toCanvas(WidgetTester tester, Offset point) =>
-      point - tester.getTopLeft(find.byType(BoardCanvas));
+      point - tester.getTopLeft(viewport());
 
   /// 双击屏幕上的 [point]。
   Future<void> doubleTapAt(WidgetTester tester, Offset point) async {
@@ -143,10 +146,7 @@ void main() {
       await tapAt(tester, otherBlankSpot);
 
       final saved = (await harness.readBoard(tester, harness.today)).cards;
-      final center = toCanvas(
-        tester,
-        tester.getCenter(find.byType(BoardCanvas)),
-      );
+      final center = toCanvas(tester, tester.getCenter(viewport()));
       expect(
         (saved.single.x, saved.single.y),
         (

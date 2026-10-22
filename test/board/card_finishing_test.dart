@@ -36,6 +36,13 @@ void main() {
 
   Finder titleField() => find.widgetWithText(TextField, '标题');
 
+  /// 正在新建、还没保存的卡片。
+  Finder draftFinder() =>
+      find.ancestor(of: titleField(), matching: find.byType(Positioned)).first;
+
+  /// 画布的可视区域，不含标题栏。
+  Finder viewport() => find.byType(InteractiveViewer);
+
   /// 单击卡片，等过了双击判定时间，单击才生效。
   Future<void> tapCard(WidgetTester tester, TaskCard card) async {
     await tester.tap(cardFinder(card));
@@ -168,6 +175,29 @@ void main() {
       await harness.dispose(tester);
     });
 
+    testWidgets('新建还没保存的卡片：第一下点它、第二下偏出落在旁边的空白处，不新建另一张，输入的内容不丢', (tester) async {
+      await harness.launch(tester);
+      await tester.tapAt(blankSpot);
+      await tester.pump(kDoubleTapMinTime);
+      await tester.tapAt(blankSpot);
+      await harness.settle(tester);
+      await tester.enterText(titleField(), '买牛奶');
+      final draft = tester.getRect(draftFinder());
+
+      await tester.tapAt(draft.centerRight - const Offset(20, 0));
+      await tester.pump(kDoubleTapMinTime);
+      await tester.tapAt(draft.centerRight + const Offset(20, 0));
+      await tester.pump(kDoubleTapTimeout);
+      await harness.settle(tester);
+
+      expect(titleField(), findsOneWidget);
+      expect(find.text('买牛奶'), findsOneWidget);
+      expect(tester.getRect(draftFinder()), draft);
+      expect((await harness.readBoard(tester, harness.today)).cards, isEmpty);
+
+      await harness.dispose(tester);
+    });
+
     testWidgets('第一下点卡片、第二下偏出卡片落在旁边的空白处：算双击卡片，完成它，不新建卡片（#50）', (tester) async {
       final card = await seedCard(tester);
       await harness.launch(tester);
@@ -177,6 +207,29 @@ void main() {
       await tester.tapAt(rect.centerRight - const Offset(20, 0));
       await tester.pump(kDoubleTapMinTime);
       await tester.tapAt(rect.centerRight + const Offset(20, 0));
+      await harness.settle(tester);
+
+      expect(titleField(), findsNothing);
+      expect(cardFinder(card), findsNothing);
+      expect((await locate(tester, card)).status, CardStatus.completed);
+      expect((await harness.readBoard(tester, harness.today)).cards, isEmpty);
+
+      await harness.dispose(tester);
+    });
+
+    testWidgets('选中的卡片：第一下点手柄、第二下偏出落在旁边的空白处：算双击卡片，完成它，不新建卡片（#50）', (
+      tester,
+    ) async {
+      final card = await seedCard(tester);
+      await harness.launch(tester);
+      await tapCard(tester, card);
+      final handle = tester.getCenter(
+        find.byKey(BoardCanvas.resizeHandleKey(card.id)),
+      );
+
+      await tester.tapAt(handle);
+      await tester.pump(kDoubleTapMinTime);
+      await tester.tapAt(handle + const Offset(30, 30));
       await harness.settle(tester);
 
       expect(titleField(), findsNothing);
@@ -260,11 +313,13 @@ void main() {
       expect(addButton(), findsOneWidget);
 
       final gesture = await startDragging(tester, card);
+      // 「＋」由 Scaffold 缩小隐藏，等它的动画播完。
+      await tester.pump(const Duration(milliseconds: 300));
 
       expect(zoneFinder(DropZone.complete), findsOneWidget);
       expect(zoneFinder(DropZone.trash), findsOneWidget);
       expect(addButton(), findsNothing);
-      final canvas = tester.getRect(find.byType(BoardCanvas));
+      final canvas = tester.getRect(viewport());
       expect(
         tester.getRect(zoneFinder(DropZone.complete)).bottom,
         lessThanOrEqualTo(canvas.bottom),
@@ -329,6 +384,53 @@ void main() {
       expect(location.inTrash, isFalse);
       expect(location.status, CardStatus.active);
       expect(find.textContaining('已移到回收站'), findsNothing);
+
+      await harness.dispose(tester);
+    });
+
+    testWidgets('连线后的弹回还没播完，另一张卡片拖进投放区保存失败弹回：弹回动画被顶替，但位置、连线和存储都正确', (
+      tester,
+    ) async {
+      final card = await seedCard(tester);
+      final target = await seedCard(tester, title: '回邮件', x: 400);
+      final other = await seedCard(tester, title: '交水费', y: 300);
+      await harness.launch(tester);
+      final before = {
+        for (final c in [card, target, other]) c: tester.getRect(cardFinder(c)),
+      };
+
+      // 拖到另一张卡片上连线，松手后卡片开始弹回，只让保存跑完、不推进动画。
+      final link = await startDragging(tester, card);
+      await link.moveTo(tester.getCenter(cardFinder(target)));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 450));
+      await link.up();
+      await harness.pumpData(tester);
+      expect(tester.getRect(cardFinder(card)), isNot(before[card]));
+
+      harness.failWrites = true;
+      final drop = await startDragging(tester, other);
+      await drop.moveTo(tester.getCenter(zoneFinder(DropZone.trash)));
+      await tester.pump();
+      await drop.up();
+      await harness.pumpData(tester);
+      // 已知限制：第一张卡片的弹回被顶替，直接回到起点。
+      expect(tester.getRect(cardFinder(card)), before[card]);
+
+      await harness.settle(tester);
+      for (final c in [card, target, other]) {
+        expect(tester.getRect(cardFinder(c)), before[c]);
+      }
+      final board = await harness.readBoard(tester, harness.today);
+      expect(board.links.single.fromCardId, card.id);
+      expect(board.links.single.toCardId, target.id);
+      for (final c in [card, target, other]) {
+        final saved = board.cards.singleWhere((s) => s.id == c.id);
+        expect((saved.x, saved.y), (c.x, c.y));
+        expect(saved.status, CardStatus.active);
+      }
+      expect((await locate(tester, other)).inTrash, isFalse);
+      expect(find.text('保存失败，请重试'), findsOneWidget);
 
       await harness.dispose(tester);
     });
@@ -451,6 +553,61 @@ void main() {
       expect(find.text('恢复失败，请重试'), findsOneWidget);
       expect(cardFinder(card), findsNothing);
       expect((await locate(tester, card)).inTrash, isTrue);
+
+      await harness.dispose(tester);
+    });
+
+    for (final (name, size, bottomInset) in [
+      ('Windows 默认窗口', const Size(800, 600), 0.0),
+      ('窄窗口', const Size(360, 640), 0.0),
+      ('Android 底部有手势导航条', const Size(360, 640), 24.0),
+    ]) {
+      testWidgets('$name：撤销提示和「＋」都完整显示，互不遮挡', (tester) async {
+        tester.view
+          ..devicePixelRatio = 1
+          ..physicalSize = size
+          ..padding = FakeViewPadding(bottom: bottomInset)
+          ..viewPadding = FakeViewPadding(bottom: bottomInset);
+        addTearDown(tester.view.reset);
+        final card = await seedCard(tester);
+        await harness.launch(tester);
+
+        await dropInto(tester, card, DropZone.trash);
+
+        final snackBar = tester.getRect(find.byType(SnackBar));
+        final add = tester.getRect(addButton());
+        expect(snackBar.overlaps(add), isFalse, reason: '$snackBar 和 $add');
+        final screen = Offset.zero & size;
+        expect(screen.contains(add.bottomRight), isTrue);
+        expect(add.bottom, lessThanOrEqualTo(size.height - bottomInset));
+        expect(snackBar.bottom, lessThanOrEqualTo(size.height));
+
+        // 提示消失后「＋」回到右下角。
+        await tester.pump(BoardCanvas.undoDuration);
+        await tester.pumpAndSettle();
+        expect(find.byType(SnackBar), findsNothing);
+        final restored = tester.getRect(addButton());
+        expect(restored.bottom, greaterThan(add.bottom));
+        expect(restored.bottom, lessThanOrEqualTo(size.height - bottomInset));
+
+        await harness.dispose(tester);
+      });
+    }
+
+    testWidgets('保存失败的提示也不遮挡「＋」', (tester) async {
+      final card = await seedCard(tester);
+      await harness.launch(tester);
+      harness.failWrites = true;
+
+      await doubleTapCard(tester, card);
+
+      expect(find.text('保存失败，请重试'), findsOneWidget);
+      expect(
+        tester
+            .getRect(find.byType(SnackBar))
+            .overlaps(tester.getRect(addButton())),
+        isFalse,
+      );
 
       await harness.dispose(tester);
     });
