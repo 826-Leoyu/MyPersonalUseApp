@@ -256,4 +256,83 @@ void main() {
       isA<CardArmed>().having((s) => s.action, 'action', LinkAction.unlink),
     );
   });
+
+  group('底部投放区', () {
+    test('指针在投放区里松手，给出投放的区和卡片的起点，回到 idle', () {
+      final machine = pressed()
+        ..move(
+          press + const Offset(30, 40),
+          cards: cards,
+          now: Duration.zero,
+          zone: DropZone.complete,
+        );
+
+      final release = machine.up();
+
+      expect(
+        release,
+        isA<CardDropped>()
+            .having((r) => r.cardId, 'cardId', 'card-1')
+            .having((r) => r.zone, 'zone', DropZone.complete)
+            .having((r) => r.releasedAt, 'releasedAt', const Offset(130, 240))
+            .having((r) => r.origin, 'origin', origin),
+      );
+      expect(machine.state, isA<CardDragIdle>());
+    });
+
+    test('指针同时在投放区和另一张卡片上时，投放区优先，不开始悬停', () {
+      final machine = pressed()
+        ..move(onTarget, cards: cards, now: Duration.zero, zone: DropZone.trash)
+        ..tick(const Duration(seconds: 1));
+
+      expect(
+        machine.state,
+        isA<CardOverZone>().having((s) => s.zone, 'zone', DropZone.trash),
+      );
+      expect(machine.up(), isA<CardDropped>());
+    });
+
+    test('armed 时进入投放区，取消准备连线；松手是投放，不连线', () {
+      final machine = hovering()..tick(CardDragMachine.armDelay);
+
+      machine.move(
+        onTarget,
+        cards: cards,
+        now: const Duration(seconds: 1),
+        zone: DropZone.complete,
+      );
+
+      expect(machine.state, isNot(isA<CardArmed>()));
+      expect(machine.state, isA<CardOverZone>());
+      expect(machine.up(), isA<CardDropped>());
+    });
+
+    test('离开投放区回到普通拖动；回到卡片上重新计时', () {
+      final machine = hovering()
+        ..move(
+          onTarget,
+          cards: cards,
+          now: const Duration(milliseconds: 300),
+          zone: DropZone.complete,
+        );
+
+      machine.move(offTarget, cards: cards, now: const Duration(seconds: 1));
+      expect(machine.state, isNot(isA<CardOverZone>()));
+      expect(machine.state, isA<CardDragging>());
+      expect(machine.up(), isA<CardMoved>());
+
+      final again = hovering()
+        ..move(
+          onTarget,
+          cards: cards,
+          now: const Duration(milliseconds: 300),
+          zone: DropZone.complete,
+        )
+        ..move(onTarget, cards: cards, now: const Duration(milliseconds: 500));
+      again.tick(const Duration(milliseconds: 899));
+      expect(again.state, isA<CardHovering>());
+      again.tick(const Duration(milliseconds: 900));
+      expect(again.state, isA<CardArmed>());
+    });
+  });
 }

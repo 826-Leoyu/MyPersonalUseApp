@@ -24,22 +24,22 @@ class BoardPage extends ConsumerWidget {
         onRetry: () => ref.invalidate(plannerServiceProvider),
       );
     }
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          day == today ? '${formatFullDate(day)} · 今天' : formatFullDate(day),
-        ),
+    final appBar = AppBar(
+      title: Text(
+        day == today ? '${formatFullDate(day)} · 今天' : formatFullDate(day),
       ),
-      body: switch (board) {
-        AsyncData(:final value) => BoardCanvas(
-          // 换一天就换一个画布：拖动、动画这些临时状态不带到另一天。
-          key: ValueKey(day),
-          board: value,
-          // 过去的日期不能新建卡片。
-          canCreateCards: day >= today,
-        ),
-        _ => const SizedBox.shrink(),
-      },
     );
+    return switch (board) {
+      // 画布自己带着页面的 Scaffold，见 [BoardCanvas]。
+      AsyncData(:final value) => BoardCanvas(
+        // 换一天就换一个画布：拖动、动画这些临时状态不带到另一天。
+        key: ValueKey(day),
+        appBar: appBar,
+        board: value,
+        // 过去的日期不能新建卡片。
+        canCreateCards: day >= today,
+      ),
+      _ => Scaffold(appBar: appBar),
+    };
   }
 }

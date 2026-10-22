@@ -512,6 +512,23 @@ void main() {
       await harness.dispose(tester);
     });
 
+    testWidgets('一端的卡片完成了（#20）', (tester) async {
+      final (a, b, linkId) = await seedPair(tester);
+      await harness.launch(tester);
+      await selectLink(tester, a, linkId);
+
+      await tester.tap(cardFinder(b));
+      await tester.pump(kDoubleTapMinTime);
+      await tester.tap(cardFinder(b));
+      await harness.settle(tester);
+
+      expect(cardFinder(b), findsNothing);
+      expect(selection(tester), isA<NothingSelected>());
+      expect(scissorsFinder, findsNothing);
+
+      await harness.dispose(tester);
+    });
+
     testWidgets('拖着一端的卡片碰另一端，断开了', (tester) async {
       final (a, b, linkId) = await seedPair(tester);
       await harness.launch(tester);
