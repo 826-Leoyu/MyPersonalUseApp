@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:my_personal_use_app/app/planner_app.dart';
 import 'package:my_personal_use_app/app/providers.dart';
 import 'package:my_personal_use_app/board/board_canvas.dart';
+import 'package:my_personal_use_app/board/board_selection.dart';
 import 'package:my_personal_use_app/planner/day_board.dart';
 import 'package:my_personal_use_app/planner/day_key.dart';
 import 'package:my_personal_use_app/planner/planner_service.dart';
@@ -122,13 +123,25 @@ class BoardHarness {
     );
   }
 
-  /// App 运行中把画布切到 [day]，等那一天的画布内容显示出来，不推进动画的时间。
-  /// 日期栏做好之前用它来测切换日期。
+  /// App 运行中的选中和编辑控制器，用来直接调用它测并发的情况。
+  BoardSelectionController selection(WidgetTester tester) =>
+      ProviderScope.containerOf(tester.element(find.byType(PlannerApp)))
+          .read(boardSelectionProvider.notifier);
+
+  /// App 运行中通过统一的入口把画布切到 [day]，等那一天的画布内容显示出来，
+  /// 不推进动画的时间。日期栏做好之前用它来测切换日期。
+  ///
+  /// 保存正在编辑的内容失败时抛出 PlannerException，不切换。
   Future<void> showDay(WidgetTester tester, DayKey day) async {
-    final container = ProviderScope.containerOf(
-      tester.element(find.byType(PlannerApp)),
-    );
-    container.read(displayedDayProvider.notifier).show(day);
+    var done = false;
+    Object? error;
+    selection(tester)
+        .showDay(day)
+        .then<void>((_) {}, onError: (Object e) => error = e)
+        .whenComplete(() => done = true);
+    await pumpData(tester, rounds: 20, until: () => done);
+    if (!done) fail('切换到 $day 没有完成');
+    if (error case final e?) throw e;
     await pumpData(tester);
   }
 

@@ -656,6 +656,58 @@ void main() {
       harness.failWrites = false;
       await harness.dispose(tester);
     });
+
+    testWidgets('正在编辑时点历史记录、卡片在回收站里：保存编辑并退出编辑，不跳转', (tester) async {
+      final card = await seedCard(tester);
+      final record = (await carryOverToNextDay(tester)).single;
+      await harness.seed(tester, (service) => service.deleteCard(card.id));
+      final other = await seedCard(tester, title: '回邮件', x: 40, y: 400);
+      await harness.moveCardToDay(tester, other.id, yesterday);
+      harness.displayedDay = yesterday;
+      await harness.launch(tester);
+      await tester.tap(cardFinder(other));
+      await tester.pump(kDoubleTapTimeout);
+      await tester.tap(cardFinder(other));
+      await tester.pump(kDoubleTapTimeout);
+      await harness.settle(tester);
+      await tester.enterText(find.widgetWithText(TextField, '回邮件'), '回邮件给老板');
+
+      await tapRecord(tester, record);
+
+      expect(find.text('该任务在回收站中'), findsOneWidget);
+      expect(titleOf('Tue, Oct 20, 2026'), findsOneWidget);
+      expect(find.byType(TextField), findsNothing);
+      expect(find.text('回邮件给老板'), findsOneWidget);
+      expect((await savedCard(tester, other)).title, '回邮件给老板');
+
+      await harness.dispose(tester);
+    });
+
+    testWidgets('正在编辑时点历史记录、卡片在回收站里、保存失败：停在编辑状态，输入的内容还在', (tester) async {
+      final card = await seedCard(tester);
+      final record = (await carryOverToNextDay(tester)).single;
+      await harness.seed(tester, (service) => service.deleteCard(card.id));
+      final other = await seedCard(tester, title: '回邮件', x: 40, y: 400);
+      await harness.moveCardToDay(tester, other.id, yesterday);
+      harness.displayedDay = yesterday;
+      await harness.launch(tester);
+      await tester.tap(cardFinder(other));
+      await tester.pump(kDoubleTapTimeout);
+      await tester.tap(cardFinder(other));
+      await tester.pump(kDoubleTapTimeout);
+      await harness.settle(tester);
+      await tester.enterText(find.widgetWithText(TextField, '回邮件'), '回邮件给老板');
+      harness.failWrites = true;
+
+      await tapRecord(tester, record);
+
+      expect(find.text('保存失败，请重试'), findsOneWidget);
+      expect(titleOf('Tue, Oct 20, 2026'), findsOneWidget);
+      expect(find.widgetWithText(TextField, '回邮件给老板'), findsOneWidget);
+
+      harness.failWrites = false;
+      await harness.dispose(tester);
+    });
   });
 
   group('「顺延」标记（AC-47 画布部分）', () {

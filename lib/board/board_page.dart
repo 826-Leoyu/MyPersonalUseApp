@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../app/providers.dart';
 import '../formatting/date_format.dart';
 import 'board_canvas.dart';
+import 'board_selection.dart';
 import 'storage_error_page.dart';
 
 /// 画布页面：存储打开后显示顶部标题和当前显示那一天的画布。存储打不开、或者读不出

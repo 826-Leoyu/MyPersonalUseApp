@@ -47,21 +47,6 @@ final todayProvider = Provider<DayKey>(
   (ref) => DayKey.fromDateTime(ref.watch(clockProvider).now()),
 );
 
-/// 画布正在显示哪一天，默认是今天。点历史记录时跳到卡片所在的日期；
-/// 日期栏（#22）也用它切换日期。
-class DisplayedDayController extends Notifier<DayKey> {
-  @override
-  DayKey build() => ref.watch(todayProvider);
-
-  /// 切换到 [day]。
-  void show(DayKey day) => state = day;
-}
-
-/// 画布正在显示哪一天。
-final displayedDayProvider = NotifierProvider<DisplayedDayController, DayKey>(
-  DisplayedDayController.new,
-);
-
 /// 某一天画布上要显示的内容。存储打不开或读取失败时是错误状态。
 final dayBoardProvider = StreamProvider.family<DayBoard, DayKey>(
   (ref, dayKey) async* {
