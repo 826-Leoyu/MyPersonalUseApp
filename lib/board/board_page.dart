@@ -5,9 +5,10 @@ import '../app/providers.dart';
 import '../formatting/date_format.dart';
 import 'board_canvas.dart';
 import 'board_selection.dart';
+import 'date_bar.dart';
 import 'storage_error_page.dart';
 
-/// 画布页面：存储打开后显示顶部标题和当前显示那一天的画布。存储打不开、或者读不出
+/// 画布页面：存储打开后显示顶部标题、日期栏和当前显示那一天的画布。存储打不开、或者读不出
 /// 画布内容时显示错误页，不显示空画布。
 class BoardPage extends ConsumerStatefulWidget {
   const BoardPage({super.key});
@@ -43,6 +44,16 @@ class _BoardPageState extends ConsumerState<BoardPage> {
       title: Text(
         day == today ? '${formatFullDate(day)} · 今天' : formatFullDate(day),
       ),
+      actions: [
+        // 一直显示，位置不跳；已经在今天时点不了。
+        TextButton(
+          onPressed: day == today
+              ? null
+              : () => switchDay(context, ref, (s) => s.showDay(today)),
+          child: const Text('今天'),
+        ),
+      ],
+      bottom: const DateBar(),
     );
     return switch (board) {
       // 画布自己带着页面的 Scaffold，见 [BoardCanvas]。

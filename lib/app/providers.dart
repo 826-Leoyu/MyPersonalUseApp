@@ -5,6 +5,7 @@ import 'package:clock/clock.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../planner/day_board.dart';
+import '../planner/day_counts.dart';
 import '../planner/day_key.dart';
 import '../planner/planner_service.dart';
 import '../storage/planner_database.dart';
@@ -56,3 +57,17 @@ final dayBoardProvider = StreamProvider.family<DayBoard, DayKey>(
   // 不自动重试：出错时停在错误页，由用户点「重试」。
   retry: (_, _) => null,
 );
+
+/// 从 [from] 起连续 7 天的任务数量，给日期栏用。读取失败时是错误状态。
+///
+/// 没有日期栏在看这一周时就停止监听：可以一直往前后翻，不能让翻过的每一周
+/// 都留着一个查询。
+final weekCountsProvider = StreamProvider.autoDispose
+    .family<Map<DayKey, DayCounts>, DayKey>(
+      (ref, from) async* {
+        final service = await ref.watch(plannerServiceProvider.future);
+        yield* service.watchDayCounts(from, from.addDays(6));
+      },
+      // 不自动重试：读不出来时格子里不显示数量。
+      retry: (_, _) => null,
+    );

@@ -90,9 +90,12 @@ enum CarryOverJump {
 /// 只能通过 [BoardSelectionController] 切换日期（[BoardSelectionController.showDay]
 /// 和点历史记录跳转）：它先保存正在编辑的内容，保存成功才切换，编辑的内容
 /// 不会因为换了一天而丢掉。
+///
+/// 只在启动时取一次今天，之后「今天」变了也不跟着变：不能绕过统一的入口
+/// 把用户选的日期和正在编辑的内容丢掉。
 class DisplayedDayController extends Notifier<DayKey> {
   @override
-  DayKey build() => ref.watch(todayProvider);
+  DayKey build() => ref.read(todayProvider);
 
   void _set(DayKey day) => state = day;
 }
@@ -121,6 +124,13 @@ class BoardSelectionController extends Notifier<BoardSelection> {
   Future<void> showDay(DayKey day) => _switchDay(() async {
     await _finishEditing();
     _show(day);
+  });
+
+  /// 切换到前后 [days] 天（◀ / ▶），规则同 [showDay]。从排到它时显示的那一天
+  /// 算起：前一次还没切完时再点，也是接着往前走，不会两次切到同一天。
+  Future<void> showDayOffset(int days) => _switchDay(() async {
+    await _finishEditing();
+    _show(ref.read(displayedDayProvider).addDays(days));
   });
 
   /// 单击卡片：没选中就选中它；已经选中就进入编辑；正在编辑它时不变。
@@ -289,6 +299,10 @@ class BoardSelectionController extends Notifier<BoardSelection> {
     }
   }
 }
+
+/// 保存失败时给用户看的提示：输入不合规时说明原因，其他情况请用户重试。
+String saveFailureMessage(PlannerException error) =>
+    error is InvalidInput ? error.message : '保存失败，请重试';
 
 /// 画布的选中和编辑状态。
 final boardSelectionProvider =

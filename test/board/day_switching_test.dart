@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:my_personal_use_app/board/board_canvas.dart';
+import 'package:my_personal_use_app/planner/day_key.dart';
 import 'package:my_personal_use_app/planner/planner_exceptions.dart';
 import 'package:my_personal_use_app/planner/task_card.dart';
 
@@ -146,6 +147,31 @@ void main() {
     expect(titleOf('Sun, Oct 18, 2026'), findsOneWidget);
     final saved = (await harness.readBoard(tester, harness.today)).cards;
     expect(saved.single.title, '买牛奶和面包');
+
+    await harness.dispose(tester);
+  });
+
+  testWidgets('正在编辑时「今天」变了：显示的日期不被重置，编辑的内容还在', (tester) async {
+    final card = await seedCard(tester);
+    await harness.launch(tester);
+    await startEditing(tester, card);
+    await tester.enterText(find.widgetWithText(TextField, '买牛奶'), '买牛奶和面包');
+
+    await harness.changeNow(tester, DateTime(2026, 10, 21, 0, 5));
+
+    expect(titleOf('Tue, Oct 20, 2026'), findsOneWidget);
+    expect(find.widgetWithText(TextField, '买牛奶和面包'), findsOneWidget);
+
+    await harness.dispose(tester);
+  });
+
+  testWidgets('看着别的日期时「今天」变了：仍然停在选的那天', (tester) async {
+    await harness.launch(tester);
+    await harness.showDay(tester, DayKey(2026, 12, 1));
+
+    await harness.changeNow(tester, DateTime(2026, 10, 21, 0, 5));
+
+    expect(titleOf('Tue, Dec 1, 2026'), findsOneWidget);
 
     await harness.dispose(tester);
   });
