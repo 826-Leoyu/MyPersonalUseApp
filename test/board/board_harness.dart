@@ -7,13 +7,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:my_personal_use_app/app/planner_app.dart';
 import 'package:my_personal_use_app/app/providers.dart';
 import 'package:my_personal_use_app/board/board_canvas.dart';
+import 'package:my_personal_use_app/board/board_selection.dart';
 import 'package:my_personal_use_app/planner/day_board.dart';
 import 'package:my_personal_use_app/planner/day_key.dart';
 import 'package:my_personal_use_app/planner/planner_service.dart';
 import 'package:my_personal_use_app/storage/planner_database.dart';
 import 'package:sqlite3/sqlite3.dart';
 
-import '../support/failing_writes.dart';
+import '../support/failing_storage.dart';
 
 /// 切入点 2 的测试环境：真实的 [PlannerApp] + 真实的 [PlannerService] +
 /// 内存 SQLite + 假时钟。
@@ -27,14 +28,15 @@ class BoardHarness {
   }
 
   final Database _sqlite;
-  final _failingWrites = FailingWrites();
+  final _failingStorage = FailingStorage();
 
   /// 假时钟的当前时间（本地时间）。
   DateTime now = DateTime(2026, 10, 20, 9);
 
   DayKey get today => DayKey.fromDateTime(now);
 
-  /// 画布显示哪一天；为 null 时显示今天。日期栏做好之前，用它来测过去的日期。
+  /// App 启动时画布显示哪一天；为 null 时显示今天。日期栏做好之前，用它来测
+  /// 过去的日期。
   DayKey? displayedDay;
 
   /// 接下来这么多次打开存储都会报错，用来模拟数据库打不开。
@@ -42,7 +44,11 @@ class BoardHarness {
 
   /// 打开后，App 的所有写入都会报错；读取不受影响。
   set failWrites(bool value) =>
-      _failingWrites.writesBeforeFailure = value ? 0 : null;
+      _failingStorage.writesBeforeFailure = value ? 0 : null;
+
+  /// 打开后，App 的所有读取都会报错。只在画布已经显示出来以后打开，
+  /// 不然画布本身就读不出来。
+  set failReads(bool value) => _failingStorage.failReads = value;
 
   Clock get _clock => Clock(() => now);
 
@@ -59,7 +65,7 @@ class BoardHarness {
       failingOpens--;
       return PlannerDatabase(LazyDatabase(() => throw Exception('模拟的数据库打不开')));
     }
-    return PlannerDatabase(_connect().interceptWith(_failingWrites));
+    return PlannerDatabase(_connect().interceptWith(_failingStorage));
   }
 
   /// 在启动 App 之前准备数据。
@@ -117,11 +123,25 @@ class BoardHarness {
     );
   }
 
-  /// App 运行中把画布切到 [day]，等那一天的画布内容显示出来，不推进动画的时间。
-  /// 日期栏做好之前用它来测切换日期。
+  /// App 运行中的选中和编辑控制器，用来直接调用它测并发的情况。
+  BoardSelectionController selection(WidgetTester tester) =>
+      ProviderScope.containerOf(tester.element(find.byType(PlannerApp)))
+          .read(boardSelectionProvider.notifier);
+
+  /// App 运行中通过统一的入口把画布切到 [day]，等那一天的画布内容显示出来，
+  /// 不推进动画的时间。日期栏做好之前用它来测切换日期。
+  ///
+  /// 保存正在编辑的内容失败时抛出 PlannerException，不切换。
   Future<void> showDay(WidgetTester tester, DayKey day) async {
-    displayedDay = day;
-    await tester.pumpWidget(_app());
+    var done = false;
+    Object? error;
+    selection(tester)
+        .showDay(day)
+        .then<void>((_) {}, onError: (Object e) => error = e)
+        .whenComplete(() => done = true);
+    await pumpData(tester, rounds: 20, until: () => done);
+    if (!done) fail('切换到 $day 没有完成');
+    if (error case final e?) throw e;
     await pumpData(tester);
   }
 
@@ -129,7 +149,8 @@ class BoardHarness {
     overrides: [
       clockProvider.overrideWithValue(_clock),
       plannerDatabaseFactoryProvider.overrideWithValue(_openDatabase),
-      displayedDayProvider.overrideWithValue(displayedDay ?? today),
+      if (displayedDay case final day?)
+        displayedDayProvider.overrideWithBuild((ref, _) => day),
     ],
     child: const PlannerApp(),
   );

@@ -8,6 +8,8 @@ import 'dart:ui';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/providers.dart';
+import '../planner/day_key.dart';
+import '../planner/planner_exceptions.dart';
 import '../planner/task_card.dart';
 
 /// 画布上选中或正在编辑的对象。
@@ -65,13 +67,61 @@ final class EditingNewCard extends Editing {
   final double y;
 }
 
+/// 单击历史记录以后的结果。
+enum CarryOverJump {
+  /// 卡片还在画布上：跳到它所在的日期并选中了它。
+  selected,
+
+  /// 卡片已完成：跳到了它所在的日期，没有选中。
+  completed,
+
+  /// 卡片在回收站里：不跳转。
+  inTrash,
+
+  /// 卡片已经不存在：不跳转。
+  missing,
+
+  /// 读不出卡片现在在哪：不跳转。
+  unreadable,
+}
+
+/// 画布正在显示哪一天，默认是今天。
+///
+/// 只能通过 [BoardSelectionController] 切换日期（[BoardSelectionController.showDay]
+/// 和点历史记录跳转）：它先保存正在编辑的内容，保存成功才切换，编辑的内容
+/// 不会因为换了一天而丢掉。
+class DisplayedDayController extends Notifier<DayKey> {
+  @override
+  DayKey build() => ref.watch(todayProvider);
+
+  void _set(DayKey day) => state = day;
+}
+
+/// 画布正在显示哪一天。
+final displayedDayProvider = NotifierProvider<DisplayedDayController, DayKey>(
+  DisplayedDayController.new,
+);
+
 /// 管理画布上的选中和编辑状态，把点击翻译成对 PlannerService 的调用。
 class BoardSelectionController extends Notifier<BoardSelection> {
   /// 正在进行的保存；保存完成前再次退出编辑时等它，不重复保存。
   Future<void>? _saving;
 
+  /// 最后一次排上队的切换日期。切换日期按先后顺序一个一个完成，后来的
+  /// 不会被先来的、还没查完的覆盖掉。
+  Future<void> _switchingDay = Future.value();
+
   @override
   BoardSelection build() => const NothingSelected();
+
+  /// 切换到 [day]：先保存正在编辑的内容，保存成功才切换，并取消选中。
+  /// 标题为空时按退出编辑的规则处理（新卡片丢弃，已有的卡片保留原来的内容）。
+  ///
+  /// 保存失败时抛出 PlannerException，停在原来的日期和编辑状态，内容不丢。
+  Future<void> showDay(DayKey day) => _switchDay(() async {
+    await _finishEditing();
+    _show(day);
+  });
 
   /// 单击卡片：没选中就选中它；已经选中就进入编辑；正在编辑它时不变。
   Future<void> tapCard(TaskCard card) async {
@@ -141,6 +191,54 @@ class BoardSelectionController extends Notifier<BoardSelection> {
         when selected == linkId) {
       state = const NothingSelected();
     }
+  }
+
+  /// 单击历史记录：先查这张卡片现在在哪，再保存正在编辑的卡片（并退出
+  /// 编辑），然后按卡片现在的状态跳转，见 [CarryOverJump]。卡片现在在哪由
+  /// 存储里的真实状态决定，不看历史记录里的日期。
+  ///
+  /// 保存失败时抛出 PlannerException，仍然停在编辑状态，不跳转；这时即使
+  /// 查卡片也失败了，也按保存失败处理。
+  Future<CarryOverJump> openCarryOverRecord(String cardId) =>
+      _switchDay(() async {
+        // 先查卡片在哪再保存：保存完马上切换，中间不再等，查的时候输入的内容
+        // 也一起保存了。
+        final service = await ref.read(plannerServiceProvider.future);
+        CardLocation? location;
+        CarryOverJump? stay;
+        try {
+          location = await service.findCard(cardId);
+          if (location.inTrash) stay = CarryOverJump.inTrash;
+        } on NotFound {
+          stay = CarryOverJump.missing;
+        } on StorageFailure {
+          stay = CarryOverJump.unreadable;
+        }
+        await _finishEditing();
+        if (stay != null) {
+          state = const NothingSelected();
+          return stay;
+        }
+        _show(location!.dayKey);
+        if (location.status == CardStatus.completed) {
+          return CarryOverJump.completed;
+        }
+        state = CardSelected(cardId);
+        return CarryOverJump.selected;
+      });
+
+  /// 等前面排队的切换日期都完成了再执行 [action]。前面的失败不影响后面的。
+  Future<T> _switchDay<T>(Future<T> Function() action) {
+    final result = _switchingDay.then((_) => action());
+    _switchingDay = result.then((_) {}, onError: (_) {});
+    return result;
+  }
+
+  /// 换到 [day] 并取消选中：选中和编辑都只属于当时显示的那一天。调用前
+  /// 要先保存正在编辑的内容。
+  void _show(DayKey day) {
+    ref.read(displayedDayProvider.notifier)._set(day);
+    state = const NothingSelected();
   }
 
   /// 单击空白处：退出编辑并保存，取消选中。

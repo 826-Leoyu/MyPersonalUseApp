@@ -47,11 +47,6 @@ final todayProvider = Provider<DayKey>(
   (ref) => DayKey.fromDateTime(ref.watch(clockProvider).now()),
 );
 
-/// 画布正在显示哪一天。现在固定是今天；日期栏（#22）做好后可以切换。
-final displayedDayProvider = Provider<DayKey>(
-  (ref) => ref.watch(todayProvider),
-);
-
 /// 某一天画布上要显示的内容。存储打不开或读取失败时是错误状态。
 final dayBoardProvider = StreamProvider.family<DayBoard, DayKey>(
   (ref, dayKey) async* {

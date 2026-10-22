@@ -12,6 +12,7 @@ import '../app/planner_theme.dart';
 import '../app/providers.dart';
 import '../formatting/date_format.dart';
 import '../planner/card_colors.dart';
+import '../planner/carry_over_record.dart';
 import '../planner/day_board.dart';
 import '../planner/link_geometry.dart';
 import '../planner/planner_exceptions.dart';
@@ -20,6 +21,7 @@ import '../planner/task_card.dart';
 import 'board_selection.dart';
 import 'card_color_dialog.dart';
 import 'card_drag.dart';
+import 'carry_over_record_view.dart';
 import 'drop_zones.dart';
 import 'link_layer.dart';
 
@@ -37,10 +39,19 @@ class BoardCanvas extends ConsumerStatefulWidget {
     required this.appBar,
     required this.board,
     required this.canCreateCards,
+    required this.transform,
   });
 
   /// 卡片组件的 key。
   static Key cardKey(String cardId) => ValueKey('card-$cardId');
+
+  /// 顺延历史记录组件的 key。
+  static Key carryOverRecordKey(String recordId) =>
+      ValueKey('carry-over-record-$recordId');
+
+  /// 顺延过的卡片右上角「顺延」标记的 key。
+  static Key carriedOverTagKey(String cardId) =>
+      ValueKey('carried-over-tag-$cardId');
 
   /// 选中的卡片右下角调整大小的手柄的 key。
   static Key resizeHandleKey(String cardId) =>
@@ -79,13 +90,16 @@ class BoardCanvas extends ConsumerStatefulWidget {
   /// 能不能在这一天新建卡片。过去的日期不能。
   final bool canCreateCards;
 
+  /// 画布的平移和缩放。由页面持有，换一天时沿用，不跟着画布重建。
+  final TransformationController transform;
+
   @override
   ConsumerState<BoardCanvas> createState() => _BoardCanvasState();
 }
 
 class _BoardCanvasState extends ConsumerState<BoardCanvas>
     with SingleTickerProviderStateMixin {
-  final _transform = TransformationController();
+  TransformationController get _transform => widget.transform;
 
   /// 卡片最远处之外再留出的空白，让画布内容区比卡片大一圈。
   static const _canvasPadding = 1000.0;
@@ -103,10 +117,11 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
   /// 最近一次双击连线的位置（画布坐标）。
   Offset? _linkDoubleTapPosition;
 
-  /// 按下时落在了连线、卡片还是新卡片上：[_downOn] 是这一次按下，
+  /// 按下时落在了连线、卡片、新卡片还是历史记录上：[_downOn] 是这一次按下，
   /// [_lastDownOn]、[_previousDownOn] 是最近一次和上一次按下；都没落在上面时
   /// 为 null。双击的第一下按在它们上面、第二下偏出去落在空白处时，外面的画布
-  /// 会认成双击空白处，靠它们认出来，改成双击那条连线、那张卡片或新卡片。
+  /// 会认成双击空白处，靠它们认出来，改成双击那条连线、那张卡片、新卡片或
+  /// 历史记录。
   _DownTarget? _downOn;
   _DownTarget? _lastDownOn;
   _DownTarget? _previousDownOn;
@@ -205,6 +220,10 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
         return;
       // 第一下点在新卡片上：和双击新卡片一样，什么都不做。
       case _DownOnDraft():
+        return;
+      // 第一下点在历史记录上：和双击历史记录一样，跳到卡片所在的日期。
+      case _DownOnRecord(:final record):
+        _openCarryOverRecord(record);
         return;
       case null:
     }
@@ -640,6 +659,49 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
   }
 
   @override
+  void initState() {
+    super.initState();
+    // 点历史记录跳到另一天时，画布按 ValueKey(day) 重建，这时卡片已经选中了：
+    // 等画布排好版，让它露出来。
+    if (ref.read(boardSelectionProvider) case CardSelected(:final cardId)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _revealCard(cardId);
+      });
+    }
+  }
+
+  /// 卡片露出来时离可视区域边缘的距离。
+  static const _revealMargin = 24.0;
+
+  /// 卡片已经完整地在可视区域里时什么都不做；不然最少地平移画布，让它完整
+  /// 出现（留出 [_revealMargin]）。不改变缩放比例。
+  void _revealCard(String cardId) {
+    final card = _boardCard(cardId);
+    final viewport = _viewportKey.currentContext?.size;
+    if (card == null || viewport == null) return;
+    final topLeft = MatrixUtils.transformPoint(
+      _transform.value,
+      Offset(card.x, card.y),
+    );
+    final shown = topLeft & Size(card.width, card.height) * _scale;
+    final dx = _revealShift(shown.left, shown.right, viewport.width);
+    final dy = _revealShift(shown.top, shown.bottom, viewport.height);
+    if (dx == 0 && dy == 0) return;
+    _transform.value = Matrix4.translationValues(dx, dy, 0)
+      ..multiply(_transform.value);
+  }
+
+  /// 把 [start] 到 [end] 这一段移进 0 到 [extent] 里要平移多少。已经在里面
+  /// 时为 0；放不下时让开头对齐。
+  static double _revealShift(double start, double end, double extent) {
+    if (start >= 0 && end <= extent) return 0;
+    if (start < 0 || end - start + 2 * _revealMargin > extent) {
+      return _revealMargin - start;
+    }
+    return extent - _revealMargin - end;
+  }
+
+  @override
   void didUpdateWidget(BoardCanvas oldWidget) {
     super.didUpdateWidget(oldWidget);
     final cards = {for (final c in widget.board.cards) c.id: c};
@@ -666,6 +728,31 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _selection.forgetLink(linkId);
       });
+    }
+  }
+
+  /// 单击历史记录：跳到卡片现在所在的日期。跳转以后这个画布就换掉了，
+  /// 所以提示用的是跳转前拿到的 messenger。
+  Future<void> _openCarryOverRecord(CarryOverRecord record) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    late final CarryOverJump jump;
+    if (!await _save(
+      () async => jump = await _selection.openCarryOverRecord(record.cardId),
+    )) {
+      return;
+    }
+    // 卡片就在这一天时画布不会重建，在这里让它露出来；换了一天的由新画布
+    // 的 initState 处理。
+    if (jump == CarryOverJump.selected && mounted) _revealCard(record.cardId);
+    final message = switch (jump) {
+      CarryOverJump.selected => null,
+      CarryOverJump.completed => '该任务已完成',
+      CarryOverJump.inTrash => '该任务在回收站中',
+      CarryOverJump.missing => '该任务已不存在',
+      CarryOverJump.unreadable => '读取失败，请重试',
+    };
+    if (message != null) {
+      messenger?.showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
@@ -719,7 +806,6 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
   void dispose() {
     _armTimer?.cancel();
     _bounceAnimation.dispose();
-    _transform.dispose();
     super.dispose();
   }
 
@@ -742,8 +828,16 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       LinkSelected(:final linkId) when curves.containsKey(linkId) => linkId,
       _ => null,
     };
-    final width = cards.fold(0.0, (w, c) => math.max(w, c.x + c.width));
-    final height = cards.fold(0.0, (h, c) => math.max(h, c.y + c.height));
+    final records = widget.board.carryOverRecords;
+    // 内容区要盖住所有卡片和历史记录，不然盖不住的部分点不到。
+    final width = [
+      ...cards.map((c) => c.x + c.width),
+      ...records.map((r) => r.x + r.width),
+    ].fold(0.0, math.max);
+    final height = [
+      ...cards.map((c) => c.y + c.height),
+      ...records.map((r) => r.y + r.height),
+    ].fold(0.0, math.max);
     final canvas = Listener(
       key: _viewportKey,
       onPointerSignal: _onPointerSignal,
@@ -811,6 +905,21 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
                     ),
                   ),
                 ),
+                // 历史记录画在连线上面、卡片下面：点击时卡片优先，其次是
+                // 历史记录，再其次才是连线。
+                for (final record in records)
+                  Positioned(
+                    left: record.x,
+                    top: record.y,
+                    width: record.width,
+                    height: record.height,
+                    child: CarryOverRecordView(
+                      key: BoardCanvas.carryOverRecordKey(record.id),
+                      record: record,
+                      onTap: () => _openCarryOverRecord(record),
+                      onPointerDown: () => _downOn = _DownOnRecord(record),
+                    ),
+                  ),
                 for (final card in ordered)
                   _CardView(
                     key: ValueKey(card.id),
@@ -959,6 +1068,13 @@ final class _DownOnCard extends _DownTarget {
 /// 按在还没保存的新卡片上。
 final class _DownOnDraft extends _DownTarget {
   const _DownOnDraft();
+}
+
+/// 按在历史记录上。
+final class _DownOnRecord extends _DownTarget {
+  const _DownOnRecord(this.record);
+
+  final CarryOverRecord record;
 }
 
 /// 让卡片退场的操作：完成，或移到回收站。
@@ -1120,12 +1236,28 @@ class _CardViewState extends State<_CardView> {
               child: _CardFrame(
                 colorArgb: card.colorArgb,
                 glow: widget.armedTarget,
-                builder: (textColor) => switch (editing) {
-                  final editing? => _CardEditor(
-                    editing: editing,
-                    textColor: textColor,
-                  ),
-                  null => _CardContent(card: card, textColor: textColor),
+                builder: (textColor) {
+                  final content = switch (editing) {
+                    final editing? => _CardEditor(
+                      editing: editing,
+                      textColor: textColor,
+                    ),
+                    null => _CardContent(card: card, textColor: textColor),
+                  };
+                  if (!card.carriedOver) return content;
+                  // 「顺延」标记单独占右上角一列，不盖住标题、备注和编辑框；
+                  // 编辑时也显示。
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: content),
+                      const SizedBox(width: 6),
+                      _CarriedOverTag(
+                        key: BoardCanvas.carriedOverTagKey(card.id),
+                        textColor: textColor,
+                      ),
+                    ],
+                  );
                 },
               ),
             ),
@@ -1276,6 +1408,31 @@ class _HeightLimitedText extends StatelessWidget {
           style: style,
         );
       },
+    );
+  }
+}
+
+/// 顺延过的卡片右上角的「顺延」标记。
+class _CarriedOverTag extends StatelessWidget {
+  const _CarriedOverTag({super.key, required this.textColor});
+
+  final Color textColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = textColor.withValues(alpha: 0.6);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: color),
+        borderRadius: const BorderRadius.all(Radius.circular(4)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+        child: Text(
+          '顺延',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color),
+        ),
+      ),
     );
   }
 }

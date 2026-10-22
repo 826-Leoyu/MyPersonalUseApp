@@ -189,6 +189,21 @@ void main() {
         throwsA(isA<NotFound>()),
       );
     });
+
+    test('读取失败时报 StorageFailure', () async {
+      final card = await harness.service.createCard(
+        harness.today,
+        x: 0,
+        y: 0,
+        title: '交作业',
+      );
+      harness.failReads = true;
+
+      await expectLater(
+        harness.service.findCard(card.id),
+        throwsA(isA<StorageFailure>()),
+      );
+    });
   });
 
   group('修改卡片内容', () {
