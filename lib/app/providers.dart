@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../planner/day_board.dart';
 import '../planner/day_counts.dart';
 import '../planner/day_key.dart';
+import '../planner/planner_exceptions.dart';
 import '../planner/planner_service.dart';
 import '../planner/task_card.dart';
 import '../planner/trashed_card.dart';
@@ -39,6 +40,13 @@ final plannerServiceProvider = FutureProvider<PlannerService>(
       rethrow;
     }
     ref.onDispose(service.close);
+    // 每日维护：冷启动时先维护，再显示画布，画布一出来就是顺延以后的样子。
+    // 回到前台时的维护见 [DailyMaintenance]。
+    try {
+      await service.runDailyMaintenance();
+    } on StorageFailure {
+      // 写不进去时照常显示画布，下次回到前台再维护。
+    }
     return service;
   },
   // 不自动重试：打不开时停在错误页，由用户点「重试」。

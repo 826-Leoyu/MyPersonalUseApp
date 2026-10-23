@@ -118,6 +118,8 @@ void main() {
 
     testWidgets('过去的日期上第一下点卡片、第二下偏出：同样完成这张卡片（#50）', (tester) async {
       final card = await seedCard(tester);
+      // 今天已经维护过：之后才放到过去日期的卡片，启动时不会被顺延走。
+      await harness.seed(tester, (service) => service.runDailyMaintenance());
       await harness.moveCardToDay(tester, card.id, harness.today.addDays(-1));
       harness.displayedDay = harness.today.addDays(-1);
       await harness.launch(tester);
@@ -631,6 +633,8 @@ void main() {
     testWidgets('过去的日期上删除后撤销：卡片按顺延规则回到今天，提示「已恢复至今天（Oct 20）」', (tester) async {
       final yesterday = harness.today.addDays(-1);
       final card = await seedCard(tester);
+      // 今天已经维护过：之后才放到过去日期的卡片，启动时不会被顺延走。
+      await harness.seed(tester, (service) => service.runDailyMaintenance());
       await harness.moveCardToDay(tester, card.id, yesterday);
       harness.displayedDay = yesterday;
       await harness.launch(tester);

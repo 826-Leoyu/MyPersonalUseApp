@@ -265,6 +265,15 @@ class BoardSelectionController extends Notifier<BoardSelection> {
   /// 保存失败时抛出 PlannerException，仍然停在编辑状态，内容不丢。
   Future<void> tapBlank() => leaveBoard();
 
+  /// 跨过了午夜、执行每日维护之前：保存正在编辑的内容，取消选中。这样改好的
+  /// 内容跟着卡片一起顺延，历史记录也记下改好的标题。
+  ///
+  /// 保存失败时抛出 PlannerException，仍然停在编辑状态，内容不丢。
+  Future<void> startNewDay() async {
+    await _finishEditing();
+    state = const NothingSelected();
+  }
+
   /// 在画布上以 [center] 为中心新建一张卡片，直接进入标题编辑。
   /// 卡片不会放到画布左上角以外。
   Future<void> newCardAt(Offset center) async {
