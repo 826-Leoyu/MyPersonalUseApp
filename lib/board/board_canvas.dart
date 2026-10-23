@@ -748,18 +748,18 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     // 卡片就在这一天时画布不会重建，在这里让它露出来；换了一天的由新画布
     // 的 initState 处理。
     if (jump == CarryOverJump.selected && mounted) _revealCard(record.cardId);
-    if (jump == CarryOverJump.completed) {
-      await CompletedPage.open(navigator, container.read(displayedDayProvider));
-      return;
-    }
     final message = switch (jump) {
-      CarryOverJump.selected || CarryOverJump.completed => null,
+      CarryOverJump.selected => null,
+      CarryOverJump.completed => null,
       CarryOverJump.inTrash => '该任务在回收站中',
       CarryOverJump.missing => '该任务已不存在',
       CarryOverJump.unreadable => '读取失败，请重试',
     };
     if (message != null) {
       messenger?.showSnackBar(SnackBar(content: Text(message)));
+    }
+    if (jump == CarryOverJump.completed) {
+      await CompletedPage.open(navigator, container.read(displayedDayProvider));
     }
   }
 

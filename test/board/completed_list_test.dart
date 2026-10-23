@@ -178,7 +178,7 @@ void main() {
       await uncomplete(tester, card);
 
       expect(itemFinder(card), findsNothing);
-      expect(find.text('已顺延至今天（Oct 21）'), findsOneWidget);
+      expect(find.text('已顺延至 Oct 21'), findsOneWidget);
       expect(
         (await harness.readBoard(tester, harness.today)).cards.map((c) => c.id),
         [card.id],

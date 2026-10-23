@@ -89,7 +89,7 @@ class _CompletedItem extends ConsumerWidget {
   }
 
   /// 取消完成：卡片回到画布，从列表里消失。卡片的日期已经过去、被顺延到
-  /// 今天的，另外提示一下。
+  /// 别的日期的，另外提示一下（系统时钟回拨时不一定是时钟的今天）。
   Future<void> _uncomplete(BuildContext context, WidgetRef ref) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
     final PlannerService service;
@@ -105,9 +105,7 @@ class _CompletedItem extends ConsumerWidget {
       final location = await service.findCard(card.id);
       if (location.dayKey != card.dayKey) {
         messenger?.showSnackBar(
-          SnackBar(
-            content: Text('已顺延至今天（${formatShortDate(location.dayKey)}）'),
-          ),
+          SnackBar(content: Text('已顺延至 ${formatShortDate(location.dayKey)}')),
         );
       }
     } on PlannerException {
