@@ -251,13 +251,19 @@ class BoardSelectionController extends Notifier<BoardSelection> {
     state = const NothingSelected();
   }
 
-  /// 单击空白处：退出编辑并保存，取消选中。
+  /// 离开画布去别的页面（例如「已完成」列表）：先保存正在编辑的内容，再
+  /// 取消选中。
   ///
   /// 保存失败时抛出 PlannerException，仍然停在编辑状态，内容不丢。
-  Future<void> tapBlank() async {
+  Future<void> leaveBoard() async {
     await _finishEditing();
     state = const NothingSelected();
   }
+
+  /// 单击空白处：和离开画布一样，退出编辑并保存，取消选中。
+  ///
+  /// 保存失败时抛出 PlannerException，仍然停在编辑状态，内容不丢。
+  Future<void> tapBlank() => leaveBoard();
 
   /// 在画布上以 [center] 为中心新建一张卡片，直接进入标题编辑。
   /// 卡片不会放到画布左上角以外。

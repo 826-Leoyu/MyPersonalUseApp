@@ -5,6 +5,7 @@ import '../app/providers.dart';
 import '../formatting/date_format.dart';
 import 'board_canvas.dart';
 import 'board_selection.dart';
+import 'completed_page.dart';
 import 'date_bar.dart';
 import 'storage_error_page.dart';
 
@@ -12,6 +13,9 @@ import 'storage_error_page.dart';
 /// 画布内容时显示错误页，不显示空画布。
 class BoardPage extends ConsumerStatefulWidget {
   const BoardPage({super.key});
+
+  /// 标题栏上打开「已完成」列表的按钮的 key。
+  static const completedButtonKey = ValueKey('completed-button');
 
   @override
   ConsumerState<BoardPage> createState() => _BoardPageState();
@@ -45,6 +49,16 @@ class _BoardPageState extends ConsumerState<BoardPage> {
         day == today ? '${formatFullDate(day)} · 今天' : formatFullDate(day),
       ),
       actions: [
+        TextButton.icon(
+          key: BoardPage.completedButtonKey,
+          onPressed: () => openCompletedList(context, ref),
+          icon: const Icon(Icons.check_circle_outline),
+          // 数量还没读到时只显示文字。
+          label: Text(switch (board.value?.completedCount) {
+            final count? => '已完成 $count',
+            null => '已完成',
+          }),
+        ),
         // 一直显示，位置不跳；已经在今天时点不了。
         TextButton(
           onPressed: day == today
