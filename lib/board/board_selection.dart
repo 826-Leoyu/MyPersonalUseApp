@@ -270,10 +270,7 @@ class BoardSelectionController extends Notifier<BoardSelection> {
   /// 不和还没完成的切换日期同时保存。
   ///
   /// 保存失败时抛出 PlannerException，仍然停在编辑状态，内容不丢。
-  Future<void> startNewDay() => _switchDay(() async {
-    await _finishEditing();
-    state = const NothingSelected();
-  });
+  Future<void> startNewDay() => _switchDay(leaveBoard);
 
   /// 在画布上以 [center] 为中心新建一张卡片，直接进入标题编辑。
   /// 卡片不会放到画布左上角以外。

@@ -2,6 +2,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:my_personal_use_app/board/board_canvas.dart';
+import 'package:my_personal_use_app/board/board_page.dart';
+import 'package:my_personal_use_app/board/trash_page.dart';
 import 'package:my_personal_use_app/planner/day_key.dart';
 import 'package:my_personal_use_app/planner/task_card.dart';
 
@@ -280,6 +282,30 @@ void main() {
 
       final saved = await harness.readBoard(tester, DayKey(2026, 10, 21));
       expect(saved.cards.map((c) => c.title), ['交房租']);
+
+      await harness.dispose(tester);
+    });
+
+    testWidgets('停在回收站时过了几天再回到前台：「还剩 N 天」按现在的时间更新', (tester) async {
+      final card = await seedCard(tester, title: '写周报');
+      await harness.seed(tester, (service) => service.deleteCard(card.id));
+      await harness.launch(tester);
+      await tester.tap(find.byKey(BoardPage.trashButtonKey));
+      await harness.settle(tester);
+      final item = find.byKey(TrashPage.itemKey(card.id));
+      expect(
+        find.descendant(of: item, matching: find.textContaining('还剩 10 天')),
+        findsOneWidget,
+      );
+      await sendToBackground(tester);
+
+      advanceDays(3);
+      await bringToForeground(tester);
+
+      expect(
+        find.descendant(of: item, matching: find.textContaining('还剩 7 天')),
+        findsOneWidget,
+      );
 
       await harness.dispose(tester);
     });

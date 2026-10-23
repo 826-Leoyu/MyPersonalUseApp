@@ -62,7 +62,11 @@ class _DailyMaintenanceState extends ConsumerState<DailyMaintenance> {
     } on StorageFailure {
       // 写不进去时不提示，下次回到前台再维护。
     }
-    if (!mounted || !newDay) return;
+    if (!mounted) return;
+    // 回收站的剩余天数只在数据变化时重新计算；没有卡片被清理时也要按现在的
+    // 时间刷新。
+    ref.invalidate(trashProvider);
+    if (!newDay) return;
     ref.invalidate(todayProvider);
     if (saved) await switchDay(context, ref, (s) => s.showDay(today));
   }
