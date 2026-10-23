@@ -17,6 +17,9 @@ void main() {
   /// 画布上一块没有卡片的空白处（屏幕坐标）。
   const blankSpot = Offset(500, 400);
 
+  /// 另一块空白处，离新建的草稿够远。
+  const otherBlankSpot = Offset(150, 500);
+
   /// 在今天的画布上准备一张卡片。
   Future<TaskCard> seedCard(
     WidgetTester tester, {
@@ -52,6 +55,15 @@ void main() {
       await tester.pump(kDoubleTapTimeout);
       await harness.settle(tester);
     }
+  }
+
+  /// 双击空白处新建一张卡片，输入标题，还没保存。
+  Future<void> startDraft(WidgetTester tester, String title) async {
+    await tester.tapAt(blankSpot);
+    await tester.pump(kDoubleTapMinTime);
+    await tester.tapAt(blankSpot);
+    await harness.settle(tester);
+    await tester.enterText(find.widgetWithText(TextField, '标题'), title);
   }
 
   /// 关掉 App 再冷启动一次。
@@ -218,11 +230,7 @@ void main() {
 
     testWidgets('跨过午夜时正在新建卡片：草稿保存到新的今天，内容不丢', (tester) async {
       await harness.launch(tester);
-      await tester.tapAt(blankSpot);
-      await tester.pump(kDoubleTapMinTime);
-      await tester.tapAt(blankSpot);
-      await harness.settle(tester);
-      await tester.enterText(find.widgetWithText(TextField, '标题'), '交房租');
+      await startDraft(tester, '交房租');
       await sendToBackground(tester);
 
       harness.now = DateTime(2026, 10, 21, 0, 5);
@@ -238,14 +246,68 @@ void main() {
       await harness.dispose(tester);
     });
 
-    testWidgets('系统时钟被调回前一天后回到前台：画布不跳回过去，停在原来的日期', (tester) async {
+    testWidgets('看着以后的日期新建卡片时跨过午夜：草稿保存在那一天', (tester) async {
+      harness.displayedDay = DayKey(2026, 12, 1);
+      await harness.launch(tester);
+      await startDraft(tester, '交房租');
+      await sendToBackground(tester);
+
+      harness.now = DateTime(2026, 10, 21, 0, 5);
+      await bringToForeground(tester);
+
+      final saved = await harness.readBoard(tester, DayKey(2026, 12, 1));
+      expect(saved.cards.map((c) => c.title), ['交房租']);
+
+      await harness.dispose(tester);
+    });
+
+    testWidgets('跨过午夜时新建的草稿保存失败：提示并保留草稿，之后再保存时存到新的今天', (tester) async {
+      await harness.launch(tester);
+      await startDraft(tester, '交房租');
+      harness.failWrites = true;
+      await sendToBackground(tester);
+
+      harness.now = DateTime(2026, 10, 21, 0, 5);
+      await bringToForeground(tester);
+
+      expect(find.text('保存失败，请重试'), findsOneWidget);
+      expect(find.widgetWithText(TextField, '交房租'), findsOneWidget);
+
+      harness.failWrites = false;
+      await tester.tapAt(otherBlankSpot);
+      await tester.pump(kDoubleTapTimeout);
+      await harness.settle(tester);
+
+      final saved = await harness.readBoard(tester, DayKey(2026, 10, 21));
+      expect(saved.cards.map((c) => c.title), ['交房租']);
+
+      await harness.dispose(tester);
+    });
+
+    testWidgets('系统时钟被调回前一天后回到前台：画布不跳回过去，原来的日期仍是今天', (tester) async {
       await harness.launch(tester);
       await sendToBackground(tester);
 
       harness.now = DateTime(2026, 10, 19, 10);
       await bringToForeground(tester);
 
-      expect(titleOf('Tue, Oct 20, 2026'), findsOneWidget);
+      expect(titleOf('Tue, Oct 20, 2026 · 今天'), findsOneWidget);
+
+      await harness.dispose(tester);
+    });
+
+    testWidgets('时钟调回去又调回来：不算跨过午夜，画布停在正在看的日期', (tester) async {
+      await harness.launch(tester);
+      await sendToBackground(tester);
+      harness.now = DateTime(2026, 10, 19, 10);
+      await bringToForeground(tester);
+      await harness.showDay(tester, DayKey(2026, 12, 1));
+      await sendToBackground(tester);
+
+      harness.now = DateTime(2026, 10, 20, 10);
+      await bringToForeground(tester);
+
+      expect(titleOf('Tue, Dec 1, 2026'), findsOneWidget);
 
       await harness.dispose(tester);
     });

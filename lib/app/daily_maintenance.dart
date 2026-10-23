@@ -10,7 +10,7 @@ import 'providers.dart';
 /// 每日维护接入 App 生命周期：每次回到前台都执行一次每日维护（同一天不会
 /// 再顺延，只清理回收站）；如果已经跨过午夜，先保存正在编辑的内容，维护后
 /// 把「今天」换成新的一天，并通过切换日期的统一入口把画布切过去。系统时钟
-/// 被调回过去时，「今天」跟着时钟变，画布停在原来的日期。
+/// 被调回过去时「今天」不往回退，画布也不跳回过去。
 ///
 /// 冷启动时的维护在 [plannerServiceProvider] 里，先维护再显示画布。
 class DailyMaintenance extends ConsumerStatefulWidget {
@@ -42,15 +42,15 @@ class _DailyMaintenanceState extends ConsumerState<DailyMaintenance> {
     final service = ref.read(plannerServiceProvider).value;
     if (service == null) return;
     final today = DayKey.fromDateTime(ref.read(clockProvider).now());
-    final previousToday = ref.read(todayProvider);
-    // 只有往后跨过午夜才算新的一天；系统时钟被调回过去时不跳回过去。
-    final newDay = today > previousToday;
+    // 只有往后跨过午夜才算新的一天。系统时钟被调回过去时「今天」不往回退
+    // （和 PlannerService 的 effectiveToday 一样），画布也不跳回过去。
+    final newDay = today > ref.read(todayProvider);
     final selection = ref.read(boardSelectionProvider.notifier);
     final messenger = ScaffoldMessenger.maybeOf(context);
     var saved = true;
     if (newDay) {
       try {
-        await selection.startNewDay(today);
+        await selection.startNewDay();
       } on PlannerException catch (e) {
         // 保存失败：停在原来的日期，编辑的内容不丢。
         messenger?.showSnackBar(SnackBar(content: Text(saveFailureMessage(e))));
@@ -62,11 +62,9 @@ class _DailyMaintenanceState extends ConsumerState<DailyMaintenance> {
     } on StorageFailure {
       // 写不进去时不提示，下次回到前台再维护。
     }
-    if (!mounted || today == previousToday) return;
+    if (!mounted || !newDay) return;
     ref.invalidate(todayProvider);
-    if (newDay && saved) {
-      await switchDay(context, ref, (s) => s.showDay(today));
-    }
+    if (saved) await switchDay(context, ref, (s) => s.showDay(today));
   }
 
   @override
