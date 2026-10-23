@@ -1,12 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../app/providers.dart';
-import '../formatting/date_format.dart';
-import '../planner/planner_exceptions.dart';
-import '../planner/planner_service.dart';
 import '../planner/task_card.dart';
 import 'board_canvas.dart';
+import 'restore_from_trash.dart';
 
 /// 删除成功后的撤销提示：点「撤销」把卡片从回收站拿回来。新的提示顶替
 /// 旧的，每个提示只恢复自己那张卡片。画布和已完成列表共用。
@@ -30,38 +27,13 @@ void showUndoDeleteNotice(
         persist: false,
         action: SnackBarAction(
           label: '撤销',
-          onPressed: () => _undoDelete(card, messenger, container, onRestored),
+          onPressed: () => restoreFromTrash(
+            card,
+            messenger,
+            container,
+            onRestored: onRestored,
+          ),
         ),
       ),
     );
-}
-
-/// 点了撤销提示上的「撤销」。卡片原来的日期已经过去、恢复时被顺延到今天
-/// 的，另外提示一下（已完成的卡片不会被顺延）。
-Future<void> _undoDelete(
-  TaskCard card,
-  ScaffoldMessengerState messenger,
-  ProviderContainer container,
-  VoidCallback? onRestored,
-) async {
-  final PlannerService service;
-  try {
-    service = await container.read(plannerServiceProvider.future);
-    await service.restoreCard(card.id);
-  } on PlannerException {
-    messenger.showSnackBar(const SnackBar(content: Text('恢复失败，请重试')));
-    return;
-  }
-  onRestored?.call();
-  // 已经恢复成功；查不到现在的日期只是少一条提示，不算恢复失败。
-  try {
-    final location = await service.findCard(card.id);
-    if (location.dayKey != card.dayKey) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('已恢复至今天（${formatShortDate(location.dayKey)}）')),
-      );
-    }
-  } on PlannerException {
-    return;
-  }
 }

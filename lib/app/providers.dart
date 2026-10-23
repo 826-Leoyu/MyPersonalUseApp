@@ -9,6 +9,7 @@ import '../planner/day_counts.dart';
 import '../planner/day_key.dart';
 import '../planner/planner_service.dart';
 import '../planner/task_card.dart';
+import '../planner/trashed_card.dart';
 import '../storage/planner_database.dart';
 
 /// App 使用的时钟；测试里换成假时钟。
@@ -83,3 +84,13 @@ final completedCardsProvider = StreamProvider.autoDispose
       // 不自动重试：读不出来时停在提示上，由用户点「重试」。
       retry: (_, _) => null,
     );
+
+/// 回收站里的卡片，按删除时间倒序，每张带剩余天数。读取失败时是错误状态。
+final trashProvider = StreamProvider.autoDispose<List<TrashedCard>>(
+  (ref) async* {
+    final service = await ref.watch(plannerServiceProvider.future);
+    yield* service.watchTrash();
+  },
+  // 不自动重试：读不出来时停在提示上，由用户点「重试」。
+  retry: (_, _) => null,
+);

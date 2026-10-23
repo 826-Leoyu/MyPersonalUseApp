@@ -128,17 +128,3 @@ class _CompletedItem extends ConsumerWidget {
     if (messenger != null) showUndoDeleteNotice(card, messenger, container);
   }
 }
-
-/// 从画布打开显示的那一天的已完成列表：先保存正在编辑的内容，保存失败时
-/// 提示，不打开。
-Future<void> openCompletedList(BuildContext context, WidgetRef ref) async {
-  final navigator = Navigator.of(context);
-  final messenger = ScaffoldMessenger.maybeOf(context);
-  try {
-    await ref.read(boardSelectionProvider.notifier).leaveBoard();
-  } on PlannerException catch (e) {
-    messenger?.showSnackBar(SnackBar(content: Text(saveFailureMessage(e))));
-    return;
-  }
-  await CompletedPage.open(navigator, ref.read(displayedDayProvider));
-}
