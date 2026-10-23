@@ -6,6 +6,7 @@ import '../formatting/date_format.dart';
 import '../planner/planner_exceptions.dart';
 import '../planner/trashed_card.dart';
 import 'board_selection.dart';
+import 'read_failure_view.dart';
 import 'restore_from_trash.dart';
 
 /// 回收站：每项显示原日期（完整格式）和「还剩 N 天」，按删除时间倒序。
@@ -44,18 +45,8 @@ class TrashPage extends ConsumerWidget {
         AsyncData(:final value) => ListView(
           children: [for (final item in value) _TrashItem(item: item)],
         ),
-        AsyncError() => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('读取失败，请重试'),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () => ref.invalidate(trashProvider),
-                child: const Text('重试'),
-              ),
-            ],
-          ),
+        AsyncError() => ReadFailureView(
+          onRetry: () => ref.invalidate(trashProvider),
         ),
         _ => const SizedBox.shrink(),
       },
@@ -115,7 +106,6 @@ class _TrashItem extends ConsumerWidget {
   /// 恢复：按 `restoreCard` 的规则回到原日期，或者顺延到今天；从列表里消失。
   void _restore(BuildContext context) {
     final messenger = ScaffoldMessenger.maybeOf(context);
-    if (messenger == null) return;
     // 恢复成功后这一项就不在了，用页面外面的容器。
     final container = ProviderScope.containerOf(context, listen: false);
     restoreFromTrash(item.card, messenger, container);

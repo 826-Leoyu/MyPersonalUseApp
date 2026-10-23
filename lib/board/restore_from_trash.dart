@@ -7,8 +7,7 @@ import '../planner/planner_exceptions.dart';
 import '../planner/planner_service.dart';
 import '../planner/task_card.dart';
 
-/// 把 [card] 从回收站拿回来。删除的撤销提示和回收站
-/// 共用。
+/// 把 [card] 从回收站拿回来。删除的撤销提示和回收站共用。
 ///
 /// 失败时提示「恢复失败，请重试」。卡片原来的日期已经过去、恢复时被顺延
 /// 到今天的，另外提示一下（已完成的卡片不会被顺延）。发起恢复的界面可能
@@ -16,7 +15,7 @@ import '../planner/task_card.dart';
 /// [onRestored]，再查卡片现在的日期。
 Future<void> restoreFromTrash(
   TaskCard card,
-  ScaffoldMessengerState messenger,
+  ScaffoldMessengerState? messenger,
   ProviderContainer container, {
   VoidCallback? onRestored,
 }) async {
@@ -25,7 +24,7 @@ Future<void> restoreFromTrash(
     service = await container.read(plannerServiceProvider.future);
     await service.restoreCard(card.id);
   } on PlannerException {
-    messenger.showSnackBar(const SnackBar(content: Text('恢复失败，请重试')));
+    messenger?.showSnackBar(const SnackBar(content: Text('恢复失败，请重试')));
     return;
   }
   onRestored?.call();
@@ -33,7 +32,7 @@ Future<void> restoreFromTrash(
   try {
     final location = await service.findCard(card.id);
     if (location.dayKey != card.dayKey) {
-      messenger.showSnackBar(
+      messenger?.showSnackBar(
         SnackBar(content: Text('已恢复至今天（${formatShortDate(location.dayKey)}）')),
       );
     }
