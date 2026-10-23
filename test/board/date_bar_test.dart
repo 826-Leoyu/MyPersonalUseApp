@@ -71,6 +71,8 @@ void main() {
 
     testWidgets('点 ◀ 切到前一天，画布显示那一天的卡片', (tester) async {
       final yesterday = harness.today.addDays(-1);
+      // 今天已经维护过：之后才放到过去日期的卡片，启动时不会被顺延走。
+      await harness.seed(tester, (service) => service.runDailyMaintenance());
       final card = await seedCard(tester, yesterday);
       await harness.launch(tester);
 

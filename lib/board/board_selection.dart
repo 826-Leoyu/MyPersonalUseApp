@@ -265,6 +265,13 @@ class BoardSelectionController extends Notifier<BoardSelection> {
   /// 保存失败时抛出 PlannerException，仍然停在编辑状态，内容不丢。
   Future<void> tapBlank() => leaveBoard();
 
+  /// 跨过了午夜、执行每日维护之前：保存正在编辑的内容，取消选中。这样改好
+  /// 的内容跟着卡片一起顺延，历史记录也记下改好的标题。和切换日期一样排队，
+  /// 不和还没完成的切换日期同时保存。
+  ///
+  /// 保存失败时抛出 PlannerException，仍然停在编辑状态，内容不丢。
+  Future<void> startNewDay() => _switchDay(leaveBoard);
+
   /// 在画布上以 [center] 为中心新建一张卡片，直接进入标题编辑。
   /// 卡片不会放到画布左上角以外。
   Future<void> newCardAt(Offset center) async {
@@ -292,7 +299,7 @@ class BoardSelectionController extends Notifier<BoardSelection> {
         await service.updateCardContent(cardId, title: title, note: note);
       case EditingNewCard(:final x, :final y):
         final card = await service.createCard(
-          ref.read(displayedDayProvider),
+          _dayForNewCard(),
           x: x,
           y: y,
           title: title,
@@ -303,6 +310,14 @@ class BoardSelectionController extends Notifier<BoardSelection> {
         state = EditingCard._(card.id, editing.title, editing.note);
         await service.updateCardContent(card.id, title: title, note: note);
     }
+  }
+
+  /// 新卡片存到哪一天：显示的那一天。草稿开始以后跨过了午夜、那一天已经
+  /// 过去时不能再新建，存到今天，草稿的内容不丢。
+  DayKey _dayForNewCard() {
+    final displayed = ref.read(displayedDayProvider);
+    final today = DayKey.fromDateTime(ref.read(clockProvider).now());
+    return displayed < today ? today : displayed;
   }
 }
 
