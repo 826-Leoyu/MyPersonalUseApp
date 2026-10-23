@@ -251,6 +251,15 @@ class BoardSelectionController extends Notifier<BoardSelection> {
     state = const NothingSelected();
   }
 
+  /// 离开画布去别的页面（例如「已完成」列表）：先保存正在编辑的内容，再
+  /// 取消选中。
+  ///
+  /// 保存失败时抛出 PlannerException，仍然停在编辑状态，内容不丢。
+  Future<void> leaveBoard() async {
+    await _finishEditing();
+    state = const NothingSelected();
+  }
+
   /// 单击空白处：退出编辑并保存，取消选中。
   ///
   /// 保存失败时抛出 PlannerException，仍然停在编辑状态，内容不丢。

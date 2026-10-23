@@ -8,6 +8,7 @@ import '../planner/day_board.dart';
 import '../planner/day_counts.dart';
 import '../planner/day_key.dart';
 import '../planner/planner_service.dart';
+import '../planner/task_card.dart';
 import '../storage/planner_database.dart';
 
 /// App 使用的时钟；测试里换成假时钟。
@@ -69,5 +70,16 @@ final weekCountsProvider = StreamProvider.autoDispose
         yield* service.watchDayCounts(from, from.addDays(6));
       },
       // 不自动重试：读不出来时格子里不显示数量。
+      retry: (_, _) => null,
+    );
+
+/// 某一天的「已完成」列表，按完成时间倒序。读取失败时是错误状态。
+final completedCardsProvider = StreamProvider.autoDispose
+    .family<List<TaskCard>, DayKey>(
+      (ref, dayKey) async* {
+        final service = await ref.watch(plannerServiceProvider.future);
+        yield* service.watchCompleted(dayKey);
+      },
+      // 不自动重试：读不出来时停在提示上，由用户点「重试」。
       retry: (_, _) => null,
     );

@@ -22,6 +22,7 @@ import 'board_selection.dart';
 import 'card_color_dialog.dart';
 import 'card_drag.dart';
 import 'carry_over_record_view.dart';
+import 'completed_page.dart';
 import 'drop_zones.dart';
 import 'link_layer.dart';
 
@@ -731,10 +732,13 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     }
   }
 
-  /// 单击历史记录：跳到卡片现在所在的日期。跳转以后这个画布就换掉了，
-  /// 所以提示用的是跳转前拿到的 messenger。
+  /// 单击历史记录：跳到卡片现在所在的日期；卡片已完成时再打开那一天的
+  /// 「已完成」列表。跳转以后这个画布就换掉了，所以提示和打开列表用的是
+  /// 跳转前拿到的 messenger、navigator 和 provider 容器。
   Future<void> _openCarryOverRecord(CarryOverRecord record) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
+    final navigator = Navigator.of(context);
+    final container = ProviderScope.containerOf(context, listen: false);
     late final CarryOverJump jump;
     if (!await _save(
       () async => jump = await _selection.openCarryOverRecord(record.cardId),
@@ -744,9 +748,12 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     // 卡片就在这一天时画布不会重建，在这里让它露出来；换了一天的由新画布
     // 的 initState 处理。
     if (jump == CarryOverJump.selected && mounted) _revealCard(record.cardId);
+    if (jump == CarryOverJump.completed) {
+      await CompletedPage.open(navigator, container.read(displayedDayProvider));
+      return;
+    }
     final message = switch (jump) {
-      CarryOverJump.selected => null,
-      CarryOverJump.completed => '该任务已完成',
+      CarryOverJump.selected || CarryOverJump.completed => null,
       CarryOverJump.inTrash => '该任务在回收站中',
       CarryOverJump.missing => '该任务已不存在',
       CarryOverJump.unreadable => '读取失败，请重试',

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:my_personal_use_app/board/board_canvas.dart';
 import 'package:my_personal_use_app/board/card_drag.dart';
+import 'package:my_personal_use_app/board/completed_page.dart';
 import 'package:my_personal_use_app/planner/carry_over_record.dart';
 import 'package:my_personal_use_app/planner/day_key.dart';
 import 'package:my_personal_use_app/planner/task_card.dart';
@@ -144,7 +145,7 @@ void main() {
       await harness.dispose(tester);
     });
 
-    testWidgets('卡片已完成：跳到它所在的日期，提示「该任务已完成」，不选中（AC-29）', (tester) async {
+    testWidgets('卡片已完成：跳到它所在的日期并打开那一天的「已完成」列表（AC-29）', (tester) async {
       final card = await seedCard(tester);
       final record = (await carryOverToNextDay(tester)).single;
       await harness.seed(tester, (service) => service.completeCard(card.id));
@@ -153,8 +154,11 @@ void main() {
 
       await tapRecord(tester, record);
 
+      expect(titleOf('Wed, Oct 21, 2026 · 已完成 1 项'), findsOneWidget);
+      expect(find.byKey(CompletedPage.itemKey(card.id)), findsOneWidget);
+      await tester.pageBack();
+      await harness.settle(tester);
       expect(titleOf('Wed, Oct 21, 2026 · 今天'), findsOneWidget);
-      expect(find.text('该任务已完成'), findsOneWidget);
       expect(cardFinder(card), findsNothing);
 
       await harness.dispose(tester);
