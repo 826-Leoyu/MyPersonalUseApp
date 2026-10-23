@@ -8,6 +8,7 @@ import '../planner/planner_exceptions.dart';
 import '../planner/planner_service.dart';
 import '../planner/task_card.dart';
 import 'board_selection.dart';
+import 'read_failure_view.dart';
 import 'undo_delete_notice.dart';
 
 /// 某一天的「已完成」列表：标题是完整格式的日期和完成数量，每项显示完成
@@ -39,18 +40,8 @@ class CompletedPage extends ConsumerWidget {
         AsyncData(:final value) => ListView(
           children: [for (final card in value) _CompletedItem(card: card)],
         ),
-        AsyncError() => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('读取失败，请重试'),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () => ref.invalidate(completedCardsProvider(day)),
-                child: const Text('重试'),
-              ),
-            ],
-          ),
+        AsyncError() => ReadFailureView(
+          onRetry: () => ref.invalidate(completedCardsProvider(day)),
         ),
         _ => const SizedBox.shrink(),
       },
@@ -127,18 +118,4 @@ class _CompletedItem extends ConsumerWidget {
     }
     if (messenger != null) showUndoDeleteNotice(card, messenger, container);
   }
-}
-
-/// 从画布打开显示的那一天的已完成列表：先保存正在编辑的内容，保存失败时
-/// 提示，不打开。
-Future<void> openCompletedList(BuildContext context, WidgetRef ref) async {
-  final navigator = Navigator.of(context);
-  final messenger = ScaffoldMessenger.maybeOf(context);
-  try {
-    await ref.read(boardSelectionProvider.notifier).leaveBoard();
-  } on PlannerException catch (e) {
-    messenger?.showSnackBar(SnackBar(content: Text(saveFailureMessage(e))));
-    return;
-  }
-  await CompletedPage.open(navigator, ref.read(displayedDayProvider));
 }
