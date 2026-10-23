@@ -7,8 +7,8 @@ import '../planner/day_key.dart';
 import '../planner/planner_exceptions.dart';
 import '../planner/planner_service.dart';
 import '../planner/task_card.dart';
-import 'board_canvas.dart';
 import 'board_selection.dart';
+import 'undo_delete_notice.dart';
 
 /// 某一天的「已完成」列表：标题是完整格式的日期和完成数量，每项显示完成
 /// 时间 `HH:mm`，按完成时间倒序。不显示「顺延」标记。
@@ -125,33 +125,7 @@ class _CompletedItem extends ConsumerWidget {
       messenger?.showSnackBar(SnackBar(content: Text(saveFailureMessage(e))));
       return;
     }
-    messenger
-      ?..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text('已移到回收站：『${card.title}』'),
-          duration: BoardCanvas.undoDuration,
-          // 带按钮的提示默认不会自己消失。
-          persist: false,
-          action: SnackBarAction(
-            label: '撤销',
-            onPressed: () => _undoDelete(messenger, container),
-          ),
-        ),
-      );
-  }
-
-  /// 点了撤销提示上的「撤销」：已完成的卡片回到原来那一天的列表。
-  Future<void> _undoDelete(
-    ScaffoldMessengerState messenger,
-    ProviderContainer container,
-  ) async {
-    try {
-      final service = await container.read(plannerServiceProvider.future);
-      await service.restoreCard(card.id);
-    } on PlannerException {
-      messenger.showSnackBar(const SnackBar(content: Text('恢复失败，请重试')));
-    }
+    if (messenger != null) showUndoDeleteNotice(card, messenger, container);
   }
 }
 

@@ -10,7 +10,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/planner_theme.dart';
 import '../app/providers.dart';
-import '../formatting/date_format.dart';
 import '../planner/card_colors.dart';
 import '../planner/carry_over_record.dart';
 import '../planner/day_board.dart';
@@ -25,6 +24,7 @@ import 'carry_over_record_view.dart';
 import 'completed_page.dart';
 import 'drop_zones.dart';
 import 'link_layer.dart';
+import 'undo_delete_notice.dart';
 
 /// 一天的画布：卡片按坐标绝对定位显示。
 ///
@@ -466,62 +466,14 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       return;
     }
     if (action == _Finish.delete && messenger != null) {
-      _showUndoDelete(card, messenger, container);
-    }
-  }
-
-  /// 删除成功后的撤销提示：点「撤销」把卡片从回收站拿回来。新的提示顶替
-  /// 旧的，每个提示只恢复自己那张卡片。
-  void _showUndoDelete(
-    TaskCard card,
-    ScaffoldMessengerState messenger,
-    ProviderContainer container,
-  ) {
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text('已移到回收站：『${card.title}』'),
-          duration: BoardCanvas.undoDuration,
-          // 带按钮的提示默认不会自己消失。
-          persist: false,
-          action: SnackBarAction(
-            label: '撤销',
-            onPressed: () => _undoDelete(card, messenger, container),
-          ),
-        ),
+      showUndoDeleteNotice(
+        card,
+        messenger,
+        container,
+        onRestored: () {
+          if (mounted) setState(() => _leaving.remove(card.id));
+        },
       );
-  }
-
-  /// 点了撤销提示上的「撤销」。画布可能已经换了一天、存储也可能重新打开过，
-  /// 所以不依赖画布还在，用的是当前的 service。卡片原来的日期已经过去、
-  /// 恢复时被顺延到今天的，另外提示一下。
-  Future<void> _undoDelete(
-    TaskCard card,
-    ScaffoldMessengerState messenger,
-    ProviderContainer container,
-  ) async {
-    final PlannerService service;
-    try {
-      service = await container.read(plannerServiceProvider.future);
-      await service.restoreCard(card.id);
-    } on PlannerException {
-      messenger.showSnackBar(const SnackBar(content: Text('恢复失败，请重试')));
-      return;
-    }
-    if (mounted) setState(() => _leaving.remove(card.id));
-    // 已经恢复成功；查不到现在的日期只是少一条提示，不算恢复失败。
-    try {
-      final location = await service.findCard(card.id);
-      if (location.dayKey != card.dayKey) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('已恢复至今天（${formatShortDate(location.dayKey)}）'),
-          ),
-        );
-      }
-    } on PlannerException {
-      return;
     }
   }
 
