@@ -6,6 +6,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../app/planner_theme.dart';
 import 'card_drag.dart';
 
 /// 找出屏幕上的一个点落在哪个投放区里。和它显示的 [DropZoneBar] 配对使用。
@@ -47,9 +48,9 @@ class DropZoneBar extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(PlannerTheme.space4),
           child: Row(
-            spacing: 16,
+            spacing: PlannerTheme.space4,
             children: [
               for (final zone in DropZone.values)
                 Expanded(
@@ -78,27 +79,37 @@ class _Zone extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (icon, label, color) = switch (zone) {
-      DropZone.complete => (Icons.check_circle, '完成', Colors.green),
-      DropZone.trash => (Icons.delete, '回收站', Colors.red),
+    final (icon, label, color, textColor) = switch (zone) {
+      DropZone.complete => (
+        Icons.check_circle,
+        '完成',
+        PlannerTheme.completeZone,
+        PlannerTheme.completeZoneText,
+      ),
+      DropZone.trash => (
+        Icons.delete,
+        '回收站',
+        PlannerTheme.trashZone,
+        PlannerTheme.trashZoneText,
+      ),
     };
     return AnimatedContainer(
       duration: const Duration(milliseconds: 120),
       height: DropZoneBar.height,
       decoration: BoxDecoration(
         color: color.withValues(alpha: active ? 0.85 : 0.25),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: PlannerTheme.zoneRadius,
         border: Border.all(color: color, width: active ? 3 : 1),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
-        spacing: 8,
+        spacing: PlannerTheme.space2,
         children: [
-          Icon(icon, color: active ? Colors.white : color),
+          Icon(icon, color: active ? PlannerTheme.onZone : color),
           Text(
             label,
             style: TextStyle(
-              color: active ? Colors.white : color.shade800,
+              color: active ? PlannerTheme.onZone : textColor,
               fontWeight: FontWeight.w600,
             ),
           ),

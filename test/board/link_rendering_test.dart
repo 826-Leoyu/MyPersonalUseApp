@@ -273,6 +273,9 @@ void main() {
 
       expect(shownLink(tester, linkId).progress, 1);
       expect(shownLink(tester, linkId).opacity, 1);
+      // 画布拿到焦点时，里面依赖焦点的组件要重建，外层的 LayoutBuilder 为此
+      // 排一帧（不是动画），先让它过去；连线要是在播动画，过了这一帧也还在播。
+      await tester.pump();
       expect(tester.hasRunningAnimations, isFalse);
 
       await harness.dispose(tester);

@@ -25,7 +25,7 @@ class TaskCard {
     required this.updatedAt,
   });
 
-  static const defaultColorArgb = 0xFFFFF3B0;
+  static const defaultColorArgb = 0xFFFFF0B8;
   static const defaultWidth = 180.0;
   static const defaultHeight = 88.0;
   static const minWidth = 120.0;
