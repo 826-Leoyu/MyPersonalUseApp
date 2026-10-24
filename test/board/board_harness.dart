@@ -138,7 +138,7 @@ class BoardHarness {
   }
 
   /// App 运行中通过统一的入口把画布切到 [day]，等那一天的画布内容显示出来，
-  /// 不推进动画的时间。不经过日期栏，直接调用入口测切换日期。
+  /// 不推进动画的时间。不经过日期抽屉，直接调用入口测切换日期。
   ///
   /// 保存正在编辑的内容失败时抛出 PlannerException，不切换。
   Future<void> showDay(WidgetTester tester, DayKey day) async {

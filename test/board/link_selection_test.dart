@@ -114,6 +114,21 @@ void main() {
     await harness.dispose(tester);
   });
 
+  testWidgets('坐标是负数的连线照常能点中', (tester) async {
+    // 连线是 (-400, -96) 到 (-220, -96) 的直线段。
+    final a = await seedCard(tester, title: 'A', x: -580, y: -140);
+    final b = await seedCard(tester, title: 'B', x: -220, y: -140);
+    final linkId = await seedLink(tester, a, b);
+    await harness.launch(tester);
+    await tester.dragFrom(const Offset(100, 250), const Offset(600, 300));
+    await harness.settle(tester);
+
+    await tapAt(tester, onScreen(tester, a, const Offset(-310, -90)));
+
+    expect(highlighted(tester), [linkId]);
+    await harness.dispose(tester);
+  });
+
   testWidgets('单击 ✂️：连线断开，保存好之后淡出，取消选中（AC-15）', (tester) async {
     final (a, _, linkId) = await seedPair(tester);
     await harness.launch(tester);

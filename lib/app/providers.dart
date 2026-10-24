@@ -68,9 +68,9 @@ final dayBoardProvider = StreamProvider.family<DayBoard, DayKey>(
   retry: (_, _) => null,
 );
 
-/// 从 [from] 起连续 7 天的任务数量，给日期栏用。读取失败时是错误状态。
+/// 从 [from] 起连续 7 天的任务数量，给日期抽屉用。读取失败时是错误状态。
 ///
-/// 没有日期栏在看这一周时就停止监听：可以一直往前后翻，不能让翻过的每一周
+/// 没有日期抽屉在显示这一周时就停止监听：可以一直往前后翻，不能让翻过的每一周
 /// 都留着一个查询。
 final weekCountsProvider = StreamProvider.autoDispose
     .family<Map<DayKey, DayCounts>, DayKey>(

@@ -5,6 +5,7 @@ import 'package:clock/clock.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -22,7 +23,7 @@ import 'card_color_dialog.dart';
 import 'card_drag.dart';
 import 'carry_over_record_view.dart';
 import 'completed_page.dart';
-import 'date_bar.dart';
+import 'date_drawer.dart';
 import 'drop_zones.dart';
 import 'link_layer.dart';
 import 'undo_delete_notice.dart';
@@ -39,6 +40,7 @@ class BoardCanvas extends ConsumerStatefulWidget {
   const BoardCanvas({
     super.key,
     required this.appBar,
+    required this.drawer,
     required this.board,
     required this.canCreateCards,
     required this.transform,
@@ -86,6 +88,9 @@ class BoardCanvas extends ConsumerStatefulWidget {
 
   /// 页面顶部的标题栏。
   final PreferredSizeWidget appBar;
+
+  /// 左侧的日期抽屉，盖在画布上面，不挤动卡片。
+  final Widget drawer;
 
   final DayBoard board;
 
@@ -429,7 +434,9 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       case PointerDownEvent() when _dragPointerId == null:
         // 桌面上只有鼠标左键能拖；触摸也算左键。
         if (event.buttons != kPrimaryButton) return;
-        _dragPointerId = event.pointer;
+        // 重新构建时 Scaffold 关掉边缘拉出抽屉的手势，按在边缘范围里的卡片
+        // 拖起来不会拉出抽屉。
+        setState(() => _dragPointerId = event.pointer);
         _drag.down(
           card.id,
           origin: Offset(card.x, card.y),
@@ -453,7 +460,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
         );
         _syncArmTimer();
       case PointerUpEvent() when event.pointer == _dragPointerId:
-        _dragPointerId = null;
+        setState(() => _dragPointerId = null);
         final release = _drag.up();
         _syncArmTimer();
         switch (release) {
@@ -473,8 +480,10 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
 
   /// 卡片的手势被别的操作抢走（比如捏合缩放画布）：卡片回到原处。
   void _onCardDragCancel() {
-    _dragPointerId = null;
-    setState(_drag.cancel);
+    setState(() {
+      _dragPointerId = null;
+      _drag.cancel();
+    });
     _syncArmTimer();
   }
 
@@ -920,7 +929,9 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       _ => null,
     };
     final records = widget.board.carryOverRecords;
-    // 内容区要盖住所有卡片和历史记录，不然盖不住的部分点不到。
+    // 画布没有边界，卡片可以放在原点左上方（坐标为负）。内容区从原点开始，
+    // 往右下盖住所有卡片和历史记录；原点左上方的部分由 [_UnboundedStack]
+    // 照样接住点击。
     final width = [
       ...cards.map((c) => c.x + c.width),
       ...records.map((r) => r.x + r.width),
@@ -929,6 +940,14 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       ...cards.map((c) => c.y + c.height),
       ...records.map((r) => r.y + r.height),
     ].fold(0.0, math.max);
+    // 连线的点击范围的左上角：最左上的卡片再往外留 [_canvasPadding]，连线
+    // 弯出卡片的部分也点得到。
+    final linkAreaOrigin = Offset(
+      math.min(0, boxes.values.map((b) => b.x).fold(0.0, math.min)) -
+          _canvasPadding,
+      math.min(0, boxes.values.map((b) => b.y).fold(0.0, math.min)) -
+          _canvasPadding,
+    );
     final canvas = Listener(
       key: _viewportKey,
       onPointerSignal: _onPointerSignal,
@@ -950,123 +969,134 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
           // 关掉 InteractiveViewer 自带的滚轮缩放（每次滚动的缩放倍数变成 1），
           // 改由 _onPointerSignal 只在按住 Ctrl 时缩放。捏合缩放不受影响。
           scaleFactor: double.infinity,
-          child: SizedBox(
+          child: _UnboundedStack(
             key: _contentKey,
-            width: width + _canvasPadding,
-            height: height + _canvasPadding,
-            child: Stack(
-              children: [
-                // 连线画在所有卡片下面。
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: LinkLayer(
-                      links: widget.board.links,
-                      boxes: boxes,
-                      selectedLinkId: selectedLink,
+            children: [
+              SizedBox(
+                width: width + _canvasPadding,
+                height: height + _canvasPadding,
+              ),
+              // 连线画在所有卡片下面。
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: LinkLayer(
+                    links: widget.board.links,
+                    boxes: boxes,
+                    selectedLinkId: selectedLink,
+                  ),
+                ),
+              ),
+              // 连线的点击范围：只有连线附近能点，其余地方点下去落到空白处。
+              // 在卡片下面，卡片盖住连线时点的是卡片。往左上多盖出一块，
+              // 盖住原点左上方的连线；位置都按画布坐标算。
+              Positioned(
+                left: linkAreaOrigin.dx,
+                top: linkAreaOrigin.dy,
+                right: 0,
+                bottom: 0,
+                child: GestureDetector(
+                  onTapUp: (details) =>
+                      _onTapLink(details.localPosition + linkAreaOrigin),
+                  // 双击连线和单击一样。连线自己接住双击，外面的画布才不会
+                  // 当成双击空白处新建卡片。
+                  onDoubleTapDown: (details) => _linkDoubleTapPosition =
+                      details.localPosition + linkAreaOrigin,
+                  onDoubleTap: () {
+                    if (_linkDoubleTapPosition case final position?) {
+                      _onTapLink(position);
+                    }
+                  },
+                  // 右键和卡片一样不区分平台；手机上没有右键。
+                  onSecondaryTapUp: (details) => _openLinkMenu(
+                    details.localPosition + linkAreaOrigin,
+                    details.globalPosition,
+                  ),
+                  child: Listener(
+                    onPointerDown: (event) => _downOn = _DownOnLink(
+                      event.localPosition + linkAreaOrigin,
+                    ),
+                    child: CustomPaint(
+                      painter: _LinkHitArea(
+                        (position) =>
+                            _linkAt(position + linkAreaOrigin) != null,
+                      ),
                     ),
                   ),
                 ),
-                // 连线的点击范围：只有连线附近能点，其余地方点下去落到空白处。
-                // 在卡片下面，卡片盖住连线时点的是卡片。
-                Positioned.fill(
+              ),
+              // 历史记录画在连线上面、卡片下面：点击时卡片优先，其次是
+              // 历史记录，再其次才是连线。
+              for (final record in records)
+                Positioned(
+                  left: record.x,
+                  top: record.y,
+                  width: record.width,
+                  height: record.height,
+                  child: CarryOverRecordView(
+                    key: BoardCanvas.carryOverRecordKey(record.id),
+                    record: record,
+                    onTap: () => _openCarryOverRecord(record),
+                    onPointerDown: () => _downOn = _DownOnRecord(record),
+                  ),
+                ),
+              for (final card in ordered)
+                _CardView(
+                  key: ValueKey(card.id),
+                  card: card,
+                  armedTarget: card.id == armed?.targetId,
+                  completing: _leaving.containsKey(card.id),
+                  onCompleted: () => _onLeft(card.id),
+                  selected:
+                      selection is CardSelected && selection.cardId == card.id,
+                  editing:
+                      selection is EditingCard && selection.cardId == card.id
+                      ? selection
+                      : null,
+                  box: boxes[card.id]!,
+                  onTap: () => _save(() => _selection.tapCard(card)),
+                  onDoubleTap: () => _finishCard(card, _Finish.complete),
+                  onPointerDown: () => _downOn = _DownOnCard(card.id),
+                  onDragPointer: (event) => _onCardPointer(card, event),
+                  onDragCancel: _onCardDragCancel,
+                  onMenu: (global) => _openCardMenu(card, global),
+                  globalToCanvas: _globalToCanvas,
+                  onResizeStart: () => _resizeHandleCardId = card.id,
+                  onResizeUpdate: (size) => _onResizeUpdate(card, size),
+                  onResizeEnd: () => _onResizeEnd(card),
+                ),
+              if (armed != null) ..._armedPreview(armed, boxes),
+              if (selection case final EditingNewCard draft)
+                Positioned(
+                  left: draft.x,
+                  top: draft.y,
+                  width: TaskCard.defaultWidth,
+                  height: TaskCard.defaultHeight,
+                  // 点在新卡片上（包括输入框以外的地方）不算点空白处。
                   child: GestureDetector(
-                    onTapUp: (details) => _onTapLink(details.localPosition),
-                    // 双击连线和单击一样。连线自己接住双击，外面的画布才不会
-                    // 当成双击空白处新建卡片。
-                    onDoubleTapDown: (details) =>
-                        _linkDoubleTapPosition = details.localPosition,
-                    onDoubleTap: () {
-                      if (_linkDoubleTapPosition case final position?) {
-                        _onTapLink(position);
-                      }
-                    },
-                    // 右键和卡片一样不区分平台；手机上没有右键。
-                    onSecondaryTapUp: (details) => _openLinkMenu(
-                      details.localPosition,
-                      details.globalPosition,
-                    ),
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {},
+                    onDoubleTap: () {},
                     child: Listener(
-                      onPointerDown: (event) =>
-                          _downOn = _DownOnLink(event.localPosition),
-                      child: CustomPaint(
-                        painter: _LinkHitArea(
-                          (position) => _linkAt(position) != null,
-                        ),
+                      onPointerDown: (_) => _downOn = const _DownOnDraft(),
+                      child: _CardFrame(
+                        colorArgb: TaskCard.defaultColorArgb,
+                        builder: (textColor) =>
+                            _CardEditor(editing: draft, textColor: textColor),
                       ),
                     ),
                   ),
                 ),
-                // 历史记录画在连线上面、卡片下面：点击时卡片优先，其次是
-                // 历史记录，再其次才是连线。
-                for (final record in records)
-                  Positioned(
-                    left: record.x,
-                    top: record.y,
-                    width: record.width,
-                    height: record.height,
-                    child: CarryOverRecordView(
-                      key: BoardCanvas.carryOverRecordKey(record.id),
-                      record: record,
-                      onTap: () => _openCarryOverRecord(record),
-                      onPointerDown: () => _downOn = _DownOnRecord(record),
-                    ),
-                  ),
-                for (final card in ordered)
-                  _CardView(
-                    key: ValueKey(card.id),
-                    card: card,
-                    armedTarget: card.id == armed?.targetId,
-                    completing: _leaving.containsKey(card.id),
-                    onCompleted: () => _onLeft(card.id),
-                    selected:
-                        selection is CardSelected &&
-                        selection.cardId == card.id,
-                    editing:
-                        selection is EditingCard && selection.cardId == card.id
-                        ? selection
-                        : null,
-                    box: boxes[card.id]!,
-                    onTap: () => _save(() => _selection.tapCard(card)),
-                    onDoubleTap: () => _finishCard(card, _Finish.complete),
-                    onPointerDown: () => _downOn = _DownOnCard(card.id),
-                    onDragPointer: (event) => _onCardPointer(card, event),
-                    onDragCancel: _onCardDragCancel,
-                    onMenu: (global) => _openCardMenu(card, global),
-                    globalToCanvas: _globalToCanvas,
-                    onResizeStart: () => _resizeHandleCardId = card.id,
-                    onResizeUpdate: (size) => _onResizeUpdate(card, size),
-                    onResizeEnd: () => _onResizeEnd(card),
-                  ),
-                if (armed != null) ..._armedPreview(armed, boxes),
-                if (selection case final EditingNewCard draft)
-                  Positioned(
-                    left: draft.x,
-                    top: draft.y,
-                    width: TaskCard.defaultWidth,
-                    height: TaskCard.defaultHeight,
-                    // 点在新卡片上（包括输入框以外的地方）不算点空白处。
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () {},
-                      onDoubleTap: () {},
-                      child: Listener(
-                        onPointerDown: (_) => _downOn = const _DownOnDraft(),
-                        child: _CardFrame(
-                          colorArgb: TaskCard.defaultColorArgb,
-                          builder: (textColor) =>
-                              _CardEditor(editing: draft, textColor: textColor),
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
+            ],
           ),
         ),
       ),
     );
     final page = Scaffold(
       appBar: widget.appBar,
+      drawer: widget.drawer,
+      drawerEdgeDragWidth: drawerEdgeDragWidth(context),
+      // 按住卡片时不从边缘拉出抽屉。
+      drawerEnableOpenDragGesture: _dragPointerId == null,
       body: Stack(
         children: [
           Positioned.fill(child: canvas),
@@ -1101,6 +1131,38 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       bindings: _shortcuts(selection),
       child: Focus(focusNode: _keyboardFocus, child: page),
     );
+  }
+}
+
+/// 画布的内容区：和 [Stack] 一样，但原点左上方（自己的范围以外）放着的
+/// 卡片、历史记录也接得住点击。普通的 [Stack] 只认自己范围以内的点击。
+/// 也不裁掉画到范围以外的部分。
+class _UnboundedStack extends Stack {
+  const _UnboundedStack({super.key, super.children})
+    : super(clipBehavior: Clip.none);
+
+  @override
+  RenderStack createRenderObject(BuildContext context) => _RenderUnboundedStack(
+    alignment: alignment,
+    textDirection: textDirection ?? Directionality.maybeOf(context),
+    fit: fit,
+    clipBehavior: clipBehavior,
+  );
+}
+
+class _RenderUnboundedStack extends RenderStack {
+  _RenderUnboundedStack({
+    super.alignment,
+    super.textDirection,
+    super.fit,
+    super.clipBehavior,
+  });
+
+  @override
+  bool hitTest(BoxHitTestResult result, {required Offset position}) {
+    if (!hitTestChildren(result, position: position)) return false;
+    result.add(BoxHitTestEntry(this, position));
+    return true;
   }
 }
 

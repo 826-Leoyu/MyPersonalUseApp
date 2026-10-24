@@ -8,7 +8,7 @@ import 'package:my_personal_use_app/planner/task_card.dart';
 
 import 'board_harness.dart';
 
-/// 切换日期的统一入口：先处理正在编辑的内容，保存成功才切换。日期栏（#22）
+/// 切换日期的统一入口：先处理正在编辑的内容，保存成功才切换。日期抽屉
 /// 和点历史记录跳转都走这个入口。
 void main() {
   late BoardHarness harness;

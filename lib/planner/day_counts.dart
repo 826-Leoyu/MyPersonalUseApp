@@ -1,4 +1,4 @@
-/// 某一天的任务数量，给日期栏用。都不包含回收站里的卡片和历史记录。
+/// 某一天的任务数量，给日期抽屉用。都不包含回收站里的卡片和历史记录。
 class DayCounts {
   const DayCounts({required this.activeCount, required this.completedCount});
 

@@ -91,6 +91,31 @@ void main() {
       await harness.dispose(tester);
     });
 
+    testWidgets('画布没有边界：在原点左上方双击，新卡片的坐标是负数', (tester) async {
+      // 用这张卡片找到原点在屏幕上的位置；拖动平移会被拖动阈值吃掉一点距离。
+      final anchor = await seedCard(tester, title: '参照', x: 200, y: 200);
+      await harness.launch(tester);
+      // 把画布往右下平移，原点左上方露出来。
+      await tester.dragFrom(const Offset(600, 450), const Offset(300, 200));
+      await harness.settle(tester);
+
+      // 双击的位置在画布上是 (20, 20)，新卡片以它为中心。
+      final origin =
+          tester.getTopLeft(cardFinder(anchor)) - const Offset(200, 200);
+      await doubleTapAt(tester, origin + const Offset(20, 20));
+      await tester.enterText(titleField(), '买牛奶');
+      await tapAt(tester, otherBlankSpot);
+
+      final saved = (await harness.readBoard(
+        tester,
+        harness.today,
+      )).cards.singleWhere((c) => c.title == '买牛奶');
+      expect(saved.x, moreOrLessEquals(20 - TaskCard.defaultWidth / 2));
+      expect(saved.y, moreOrLessEquals(20 - TaskCard.defaultHeight / 2));
+
+      await harness.dispose(tester);
+    });
+
     testWidgets('新建后标题为空就点空白处，卡片不保存', (tester) async {
       await harness.launch(tester);
 

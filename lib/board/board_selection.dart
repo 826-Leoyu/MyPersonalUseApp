@@ -2,7 +2,6 @@
 /// 「点击和选中规则」；撤销栈见 spec 的「撤销栈」。
 library;
 
-import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -174,8 +173,9 @@ class BoardSelectionController extends Notifier<BoardSelection> {
     _show(day);
   });
 
-  /// 切换到前后 [days] 天（◀ / ▶），规则同 [showDay]。从排到它时显示的那一天
-  /// 算起：前一次还没切完时再点，也是接着往前走，不会两次切到同一天。
+  /// 切换到前后 [days] 天（Windows 的 ← / → 快捷键），规则同 [showDay]。从
+  /// 排到它时显示的那一天算起：前一次还没切完时再按，也是接着往前走，不会
+  /// 两次切到同一天。
   Future<void> showDayOffset(int days) => _switchDay(() async {
     await _finishEditing();
     _show(ref.read(displayedDayProvider).addDays(days));
@@ -422,12 +422,12 @@ class BoardSelectionController extends Notifier<BoardSelection> {
   Future<void> startNewDay() => _switchDay(leaveBoard);
 
   /// 在画布上以 [center] 为中心新建一张卡片，直接进入标题编辑。
-  /// 卡片不会放到画布左上角以外。
+  /// 画布没有边界，坐标可以是负数。
   Future<void> newCardAt(Offset center) async {
     await _finishEditing();
     state = EditingNewCard(
-      x: math.max(0, center.dx - TaskCard.defaultWidth / 2),
-      y: math.max(0, center.dy - TaskCard.defaultHeight / 2),
+      x: center.dx - TaskCard.defaultWidth / 2,
+      y: center.dy - TaskCard.defaultHeight / 2,
     );
   }
 
