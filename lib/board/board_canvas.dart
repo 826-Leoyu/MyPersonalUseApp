@@ -24,6 +24,7 @@ import 'card_drag.dart';
 import 'carry_over_record_view.dart';
 import 'completed_page.dart';
 import 'date_drawer.dart';
+import 'dot_grid.dart';
 import 'drop_zones.dart';
 import 'link_layer.dart';
 import 'undo_delete_notice.dart';
@@ -1101,6 +1102,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       dragging: _dragPointerId != null,
       body: Stack(
         children: [
+          Positioned.fill(child: DotGrid(transform: _transform)),
           Positioned.fill(child: canvas),
           if (selectedLink != null)
             _linkScissors(selectedLink, curves[selectedLink]!),

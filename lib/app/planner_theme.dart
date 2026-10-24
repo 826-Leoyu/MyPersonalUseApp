@@ -1,12 +1,15 @@
 import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/material.dart';
 
-/// 按 `docs/ui/` 参考图定的视觉规范（spec「视觉规范」）：灰白背景、白色内容
-/// 区、系统字体（不指定字体）、大圆角、几乎不用阴影、金黄色强调色。颜色、
+/// 按 `docs/ui/` 参考图定的视觉规范（spec「视觉规范」）：灰白背景加淡淡的
+/// 点阵、白色内容区、系统字体（不指定字体）、大圆角、几乎不用阴影、金黄色强调色。颜色、
 /// 圆角、间距都在这里定义，组件里不写死。
 abstract final class PlannerTheme {
-  /// 页面和画布的背景，画布没有点阵。
+  /// 页面和画布的背景。
   static const background = Color(0xFFF5F5F7);
+
+  /// 画布背景点阵的点，见 `DotGrid`。
+  static const dot = Color(0xFFD1D1D6);
 
   /// 内容表面：日期抽屉、对话框、菜单。
   static const surface = Color(0xFFFFFFFF);
