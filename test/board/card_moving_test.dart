@@ -65,6 +65,51 @@ void main() {
     await harness.settle(tester);
   }
 
+  /// 在空白处拖动，把画布平移 [offset]。
+  Future<void> panCanvas(WidgetTester tester, Offset offset) async {
+    await tester.dragFrom(const Offset(600, 450), offset);
+    await harness.settle(tester);
+  }
+
+  testWidgets('画布没有边界：卡片可以拖到原点左上方，坐标是负数', (tester) async {
+    final card = await seedCard(tester);
+    await harness.launch(tester);
+    await panCanvas(tester, const Offset(300, 200));
+    final before = tester.getRect(cardFinder(card));
+
+    await dragCard(tester, card, const Offset(-200, -150));
+
+    expect(
+      tester.getRect(cardFinder(card)),
+      rectMoreOrLessEquals(before.shift(const Offset(-200, -150))),
+    );
+    final saved = await savedCard(tester, card);
+    expect(saved.x, moreOrLessEquals(-160));
+    expect(saved.y, moreOrLessEquals(-90));
+    await harness.dispose(tester);
+  });
+
+  testWidgets('坐标是负数的卡片照常能选中、能拖动', (tester) async {
+    final card = await seedCard(tester, x: -100, y: -50);
+    await harness.launch(tester);
+    await panCanvas(tester, const Offset(300, 200));
+
+    await tapCard(tester, card);
+    expect(handleFinder(card), findsOneWidget);
+
+    final before = tester.getRect(cardFinder(card));
+    await dragCard(tester, card, const Offset(-60, -40));
+
+    expect(
+      tester.getRect(cardFinder(card)),
+      rectMoreOrLessEquals(before.shift(const Offset(-60, -40))),
+    );
+    final saved = await savedCard(tester, card);
+    expect(saved.x, moreOrLessEquals(-160));
+    expect(saved.y, moreOrLessEquals(-90));
+    await harness.dispose(tester);
+  });
+
   testWidgets('拖动卡片后它停在松手的位置并保存，画布不平移', (tester) async {
     final card = await seedCard(tester);
     final other = await seedCard(tester, title: '回邮件', x: 400);

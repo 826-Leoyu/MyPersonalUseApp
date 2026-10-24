@@ -77,11 +77,11 @@ void main() {
     expect(machine.state, isA<CardDragIdle>());
   });
 
-  test('卡片不会拖到画布左上角以外，坐标最小是 0', () {
+  test('画布没有边界：卡片可以拖到原点左上方，坐标可以是负数', () {
     final machine = pressed();
 
     machine.move(
-      press + const Offset(-500, -40),
+      press + const Offset(-500, -400),
       cards: cards,
       now: Duration.zero,
     );
@@ -91,7 +91,7 @@ void main() {
       isA<CardDragging>().having(
         (s) => s.position,
         'position',
-        const Offset(0, 160),
+        const Offset(-400, -200),
       ),
     );
   });

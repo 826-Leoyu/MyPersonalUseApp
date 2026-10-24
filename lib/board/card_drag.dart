@@ -10,7 +10,6 @@
 /// 由那个任务接上。
 library;
 
-import 'dart:math' as math;
 import 'dart:ui';
 
 import '../planner/link_geometry.dart';
@@ -298,21 +297,18 @@ class CardDragMachine {
   /// 手势被别的操作抢走（比如捏合缩放画布）：放弃拖动，卡片回到原处。
   void cancel() => _state = const CardDragIdle();
 
-  /// 卡片跟着指针走，但不会放到画布左上角以外。
+  /// 卡片跟着指针走。画布没有边界，坐标可以是负数。
   CardDragging _dragTo(
     String cardId,
     Offset origin,
     Offset pointer,
     Offset grab,
-  ) {
-    final position = pointer + grab;
-    return CardDragging(
-      cardId: cardId,
-      origin: origin,
-      position: Offset(math.max(0, position.dx), math.max(0, position.dy)),
-      grab: grab,
-    );
-  }
+  ) => CardDragging(
+    cardId: cardId,
+    origin: origin,
+    position: pointer + grab,
+    grab: grab,
+  );
 
   /// 指针所在的最上面一张卡片，不算 [except]；不在任何卡片上时为 null。
   static String? _cardAt(

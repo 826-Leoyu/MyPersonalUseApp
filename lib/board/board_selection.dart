@@ -2,7 +2,6 @@
 /// 「点击和选中规则」；撤销栈见 spec 的「撤销栈」。
 library;
 
-import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -423,12 +422,12 @@ class BoardSelectionController extends Notifier<BoardSelection> {
   Future<void> startNewDay() => _switchDay(leaveBoard);
 
   /// 在画布上以 [center] 为中心新建一张卡片，直接进入标题编辑。
-  /// 卡片不会放到画布左上角以外。
+  /// 画布没有边界，坐标可以是负数。
   Future<void> newCardAt(Offset center) async {
     await _finishEditing();
     state = EditingNewCard(
-      x: math.max(0, center.dx - TaskCard.defaultWidth / 2),
-      y: math.max(0, center.dy - TaskCard.defaultHeight / 2),
+      x: center.dx - TaskCard.defaultWidth / 2,
+      y: center.dy - TaskCard.defaultHeight / 2,
     );
   }
 
