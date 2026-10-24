@@ -233,6 +233,8 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
             switchDay(context, ref, (s) => s.showDayOffset(1)),
         const SingleActivator(LogicalKeyboardKey.keyT, includeRepeats: false):
             _showToday,
+        // 编辑时交给编辑框撤销输入的文字。
+        const SingleActivator(LogicalKeyboardKey.keyZ, control: true): _undo,
       },
       // 编辑时保存并退出编辑，不在编辑时取消选中。
       const SingleActivator(
@@ -248,6 +250,24 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
           includeRepeats: false,
         ): _onAddCard,
     };
+  }
+
+  /// Ctrl+Z：撤销最近的一条操作，撤销不了时提示「无法撤销」。被撤销动到的
+  /// 卡片不再用临时的位置或退场状态，按数据库里的样子显示。
+  Future<void> _undo() async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    switch (await _selection.undo()) {
+      case NothingToUndo():
+        return;
+      case Undone(:final cardId):
+        if (cardId == null || !mounted) return;
+        setState(() {
+          _leaving.remove(cardId);
+          if (_dropping?.cardId == cardId) _dropping = null;
+        });
+      case CannotUndo():
+        messenger?.showSnackBar(const SnackBar(content: Text('无法撤销')));
+    }
   }
 
   /// 按 T 回到今天。和「今天」按钮一样，已经在今天时什么都不做。
@@ -490,10 +510,9 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       ),
     );
     _bounceAnimation.forward(from: 0);
-    final saved = await _save(() async {
-      final service = await ref.read(plannerServiceProvider.future);
-      await service.toggleLink(release.cardId, release.targetId);
-    });
+    final saved = await _save(
+      () => _selection.toggleLink(release.cardId, release.targetId),
+    );
     if (saved && defaultTargetPlatform == TargetPlatform.android) {
       unawaited(HapticFeedback.lightImpact());
     }
@@ -699,11 +718,18 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
   /// 保存拖动后的位置。保存好之前卡片停在新位置；保存失败时回到原处。
   Future<void> _moveCard(CardDrop drop) async {
     final (:cardId, :position) = drop;
+    final card = _boardCard(cardId);
+    if (card == null) return;
+    // 上一次松手的位置还没保存好就又拖了一次：从那个位置开始算。
+    final from = switch (_dropping) {
+      (cardId: final dropped, :final position) when dropped == cardId =>
+        position,
+      _ => Offset(card.x, card.y),
+    };
     setState(() => _dropping = drop);
-    final saved = await _save(() async {
-      final service = await ref.read(plannerServiceProvider.future);
-      await service.moveCard(cardId, x: position.dx, y: position.dy);
-    });
+    final saved = await _save(
+      () => _selection.moveCard(cardId, from: from, to: position),
+    );
     // 只清自己这张；保存期间可能又拖了另一张卡片。
     if (!saved && mounted && _dropping?.cardId == cardId) {
       setState(() => _dropping = null);

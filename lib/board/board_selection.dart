@@ -1,5 +1,5 @@
-/// 「选择与撤销控制器」里的选中和编辑部分：画布上同一时间最多选中一个
-/// 对象，点击规则见 spec 的「点击和选中规则」。撤销栈在 #27 加。
+/// 「选择与撤销控制器」：画布上同一时间最多选中一个对象，点击规则见 spec 的
+/// 「点击和选中规则」；撤销栈见 spec 的「撤销栈」。
 library;
 
 import 'dart:math' as math;
@@ -9,7 +9,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/providers.dart';
 import '../planner/day_key.dart';
+import '../planner/link.dart';
 import '../planner/planner_exceptions.dart';
+import '../planner/planner_service.dart';
 import '../planner/task_card.dart';
 
 /// 画布上选中或正在编辑的对象。
@@ -85,6 +87,37 @@ enum CarryOverJump {
   unreadable,
 }
 
+/// 按一次 Ctrl+Z 的结果。
+sealed class UndoResult {
+  const UndoResult();
+}
+
+/// 撤销栈是空的，什么都没做。
+final class NothingToUndo extends UndoResult {
+  const NothingToUndo();
+}
+
+/// 撤销了一条操作，[cardId] 是它动到的卡片（移回原处、取消完成、从回收站
+/// 拿回来的那张）；撤销连线和断开时为 null。
+final class Undone extends UndoResult {
+  const Undone(this.cardId);
+
+  final String? cardId;
+}
+
+/// 撤销失败（比如那张卡片已经不在原来的状态了），这一条已经丢掉。
+final class CannotUndo extends UndoResult {
+  const CannotUndo();
+}
+
+/// 撤销栈里的一条操作：[cardId] 见 [Undone]，[undo] 把它撤销掉。
+final class _UndoEntry {
+  const _UndoEntry(this.undo, {this.cardId});
+
+  final String? cardId;
+  final Future<void> Function(PlannerService service) undo;
+}
+
 /// 画布正在显示哪一天，默认是今天。
 ///
 /// 只能通过 [BoardSelectionController] 切换日期（[BoardSelectionController.showDay]
@@ -113,6 +146,21 @@ class BoardSelectionController extends Notifier<BoardSelection> {
   /// 最后一次排上队的切换日期。切换日期按先后顺序一个一个完成，后来的
   /// 不会被先来的、还没查完的覆盖掉。
   Future<void> _switchingDay = Future.value();
+
+  /// 撤销栈最多记这么多条，再多就丢掉最早的。
+  static const undoLimit = 50;
+
+  /// 撤销栈，最后一条是最近的操作。只存在内存里，切换日期和顺延时清空。
+  final _undoStack = <_UndoEntry>[];
+
+  /// 最后一次排上队的撤销。连按 Ctrl+Z 时一条一条按顺序撤销。
+  Future<void> _undoing = Future.value();
+
+  /// 还在保存、成功后要记进撤销栈的操作（失败也算完成）。
+  final _recording = <Future<void>>{};
+
+  /// 撤销栈每清空一次加一；保存期间变了的操作不记进撤销栈。
+  var _undoGeneration = 0;
 
   @override
   BoardSelection build() => const NothingSelected();
@@ -162,36 +210,82 @@ class BoardSelectionController extends Notifier<BoardSelection> {
     state = EditingCard(card);
   }
 
-  /// 卡片菜单里的「删除」：把卡片移到回收站；它是选中的就取消选中。
+  /// 拖动卡片后松手：把卡片从 [from] 移到 [to]，记进撤销栈。碰撞后弹回原位
+  /// 不算移动，不走这里。
+  ///
+  /// 保存失败时抛出 PlannerException，不记进撤销栈。
+  Future<void> moveCard(
+    String cardId, {
+    required Offset from,
+    required Offset to,
+  }) => _record((service) async {
+    await service.moveCard(cardId, x: to.dx, y: to.dy);
+    return _UndoEntry(
+      (service) => service.moveCard(cardId, x: from.dx, y: from.dy),
+      cardId: cardId,
+    );
+  });
+
+  /// 删除卡片（菜单、Delete 键，或拖进 🗑️ 区）：把卡片移到回收站，记进
+  /// 撤销栈；它是选中的就取消选中。
   ///
   /// 删除失败时抛出 PlannerException，选中状态不变。
   Future<void> deleteCard(String cardId) async {
-    final service = await ref.read(plannerServiceProvider.future);
-    await service.deleteCard(cardId);
+    await _record((service) async {
+      await service.deleteCard(cardId);
+      return _UndoEntry(
+        (service) => service.restoreCard(cardId),
+        cardId: cardId,
+      );
+    });
     if (state case CardSelected(cardId: final selected)
         when selected == cardId) {
       state = const NothingSelected();
     }
   }
 
-  /// 完成卡片（双击，或拖进 ✅ 区）；它是选中的就取消选中。
+  /// 完成卡片（双击、Ctrl+Enter，或拖进 ✅ 区），记进撤销栈；它是选中的
+  /// 就取消选中。
   ///
   /// 完成失败时抛出 PlannerException，选中状态不变。
   Future<void> completeCard(String cardId) async {
-    final service = await ref.read(plannerServiceProvider.future);
-    await service.completeCard(cardId);
+    await _record((service) async {
+      await service.completeCard(cardId);
+      return _UndoEntry(
+        (service) => service.uncompleteCard(cardId),
+        cardId: cardId,
+      );
+    });
     if (state case CardSelected(cardId: final selected)
         when selected == cardId) {
       state = const NothingSelected();
     }
   }
 
-  /// 断开连线（✂️ 或右键菜单）；它是选中的就取消选中。
+  /// 拖着 [draggedId] 碰到 [targetId] 后松手：两者之间有连线就断开，没有就
+  /// 新建一条，记进撤销栈。卡片弹回原位不算移动。
+  ///
+  /// 保存失败时抛出 PlannerException，不记进撤销栈。
+  Future<void> toggleLink(String draggedId, String targetId) =>
+      _record((service) async {
+        return switch (await service.toggleLink(draggedId, targetId)) {
+          LinkCreated(:final linkId) => _UndoEntry(
+            (service) => service.removeLink(linkId),
+          ),
+          LinkRemoved(:final linkId) => _UndoEntry(
+            (service) => service.restoreLink(linkId),
+          ),
+        };
+      });
+
+  /// 断开连线（✂️ 或右键菜单），记进撤销栈；它是选中的就取消选中。
   ///
   /// 断开失败时抛出 PlannerException，选中状态不变。
   Future<void> removeLink(String linkId) async {
-    final service = await ref.read(plannerServiceProvider.future);
-    await service.removeLink(linkId);
+    await _record((service) async {
+      await service.removeLink(linkId);
+      return _UndoEntry((service) => service.restoreLink(linkId));
+    });
     forgetLink(linkId);
   }
 
@@ -237,6 +331,52 @@ class BoardSelectionController extends Notifier<BoardSelection> {
         return CarryOverJump.selected;
       });
 
+  /// 撤销最近的一条操作（Ctrl+Z）。连按时按顺序一条一条撤销。撤销失败时
+  /// 丢掉这一条，返回 [CannotUndo]。
+  Future<UndoResult> undo() {
+    final result = _undoing.then((_) async {
+      // 还在保存的操作保存好、记进撤销栈以后再撤销，按相反的顺序撤销。
+      await Future.wait(_recording);
+      if (_undoStack.isEmpty) return const NothingToUndo();
+      final entry = _undoStack.removeLast();
+      try {
+        await entry.undo(await ref.read(plannerServiceProvider.future));
+      } on PlannerException {
+        return const CannotUndo();
+      }
+      return Undone(entry.cardId);
+    });
+    _undoing = result.then((_) {}, onError: (_) {});
+    return result;
+  }
+
+  /// 清空撤销栈（切换日期、执行了顺延的每日维护）。正在撤销的那一条照常
+  /// 完成；还在保存的操作保存好以后也不再记进来。
+  void clearUndo() {
+    _undoStack.clear();
+    _undoGeneration++;
+  }
+
+  /// 执行一次要记进撤销栈的写入 [write]，成功后把它返回的撤销动作记进
+  /// 撤销栈，超过 [undoLimit] 时丢掉最早的。保存期间撤销栈被清空过时不记。
+  ///
+  /// 写入失败时抛出 PlannerException，不记进撤销栈。
+  Future<void> _record(
+    Future<_UndoEntry> Function(PlannerService service) write,
+  ) {
+    final generation = _undoGeneration;
+    final result = () async {
+      final entry = await write(await ref.read(plannerServiceProvider.future));
+      if (generation != _undoGeneration) return;
+      _undoStack.add(entry);
+      if (_undoStack.length > undoLimit) _undoStack.removeAt(0);
+    }();
+    final settled = result.then((_) {}, onError: (_) {});
+    _recording.add(settled);
+    settled.whenComplete(() => _recording.remove(settled));
+    return result;
+  }
+
   /// 等前面排队的切换日期都完成了再执行 [action]。前面的失败不影响后面的。
   Future<T> _switchDay<T>(Future<T> Function() action) {
     final result = _switchingDay.then((_) => action());
@@ -244,11 +384,12 @@ class BoardSelectionController extends Notifier<BoardSelection> {
     return result;
   }
 
-  /// 换到 [day] 并取消选中：选中和编辑都只属于当时显示的那一天。调用前
-  /// 要先保存正在编辑的内容。
+  /// 换到 [day] 并取消选中、清空撤销栈：选中、编辑和撤销都只属于当时显示的
+  /// 那一天。调用前要先保存正在编辑的内容。
   void _show(DayKey day) {
     ref.read(displayedDayProvider.notifier)._set(day);
     state = const NothingSelected();
+    clearUndo();
   }
 
   /// 离开画布去别的页面（例如「已完成」列表）：先保存正在编辑的内容，再
