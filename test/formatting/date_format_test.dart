@@ -56,9 +56,9 @@ void main() {
     });
   });
 
-  group('日期栏两行格式', () {
-    test('第一行是月份缩写和日期，第二行是星期缩写', () {
-      final label = formatDateBarLabel(DayKey.parse('2026-10-20'));
+  group('日期抽屉每一行的日期和星期', () {
+    test('日期是月份缩写加日期，星期是星期缩写', () {
+      final label = formatDateDrawerLabel(DayKey.parse('2026-10-20'));
 
       expect(label.date, 'Oct 20');
       expect(label.weekday, 'Tue');
@@ -67,7 +67,7 @@ void main() {
     test('不是今年的日期也不加年份', () {
       final label = withClock(
         Clock.fixed(DateTime(2026, 10, 20, 9)),
-        () => formatDateBarLabel(DayKey.parse('2027-01-03')),
+        () => formatDateDrawerLabel(DayKey.parse('2027-01-03')),
       );
 
       expect(label.date, 'Jan 3');
@@ -113,8 +113,8 @@ void main() {
       expect(text, 'Jan 3, 2027');
     });
 
-    test('日期栏两行仍输出英文缩写', () {
-      final label = formatDateBarLabel(DayKey.parse('2026-11-01'));
+    test('日期抽屉每一行仍输出英文缩写', () {
+      final label = formatDateDrawerLabel(DayKey.parse('2026-11-01'));
 
       expect(label.date, 'Nov 1');
       expect(label.weekday, 'Sun');

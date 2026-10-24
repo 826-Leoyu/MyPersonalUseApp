@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../board/board_selection.dart';
-import '../board/date_bar.dart';
+import '../board/date_drawer.dart';
 import '../planner/day_key.dart';
 import '../planner/planner_exceptions.dart';
 import 'providers.dart';

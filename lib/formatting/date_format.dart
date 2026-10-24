@@ -20,8 +20,8 @@ String formatShortDate(DayKey day) {
   return DateFormat(pattern, _locale).format(_toDateTime(day));
 }
 
-/// 日期栏格子的两行，例如 `Oct 20` / `Tue`。一律不显示年份。
-({String date, String weekday}) formatDateBarLabel(DayKey day) {
+/// 日期抽屉每一行的日期和星期，例如 `Oct 20` / `Tue`。一律不显示年份。
+({String date, String weekday}) formatDateDrawerLabel(DayKey day) {
   final time = _toDateTime(day);
   return (
     date: DateFormat('MMM d', _locale).format(time),

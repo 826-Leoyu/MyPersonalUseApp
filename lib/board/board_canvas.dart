@@ -22,7 +22,7 @@ import 'card_color_dialog.dart';
 import 'card_drag.dart';
 import 'carry_over_record_view.dart';
 import 'completed_page.dart';
-import 'date_bar.dart';
+import 'date_drawer.dart';
 import 'drop_zones.dart';
 import 'link_layer.dart';
 import 'undo_delete_notice.dart';
@@ -39,6 +39,7 @@ class BoardCanvas extends ConsumerStatefulWidget {
   const BoardCanvas({
     super.key,
     required this.appBar,
+    required this.drawer,
     required this.board,
     required this.canCreateCards,
     required this.transform,
@@ -86,6 +87,9 @@ class BoardCanvas extends ConsumerStatefulWidget {
 
   /// 页面顶部的标题栏。
   final PreferredSizeWidget appBar;
+
+  /// 左侧的日期抽屉，盖在画布上面，不挤动卡片。
+  final Widget drawer;
 
   final DayBoard board;
 
@@ -429,7 +433,9 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       case PointerDownEvent() when _dragPointerId == null:
         // 桌面上只有鼠标左键能拖；触摸也算左键。
         if (event.buttons != kPrimaryButton) return;
-        _dragPointerId = event.pointer;
+        // 重新构建时 Scaffold 关掉边缘拉出抽屉的手势，按在边缘范围里的卡片
+        // 拖起来不会拉出抽屉。
+        setState(() => _dragPointerId = event.pointer);
         _drag.down(
           card.id,
           origin: Offset(card.x, card.y),
@@ -453,7 +459,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
         );
         _syncArmTimer();
       case PointerUpEvent() when event.pointer == _dragPointerId:
-        _dragPointerId = null;
+        setState(() => _dragPointerId = null);
         final release = _drag.up();
         _syncArmTimer();
         switch (release) {
@@ -473,8 +479,10 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
 
   /// 卡片的手势被别的操作抢走（比如捏合缩放画布）：卡片回到原处。
   void _onCardDragCancel() {
-    _dragPointerId = null;
-    setState(_drag.cancel);
+    setState(() {
+      _dragPointerId = null;
+      _drag.cancel();
+    });
     _syncArmTimer();
   }
 
@@ -1067,6 +1075,10 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     );
     final page = Scaffold(
       appBar: widget.appBar,
+      drawer: widget.drawer,
+      drawerEdgeDragWidth: drawerEdgeDragWidth(context),
+      // 按住卡片时不从边缘拉出抽屉。
+      drawerEnableOpenDragGesture: _dragPointerId == null,
       body: Stack(
         children: [
           Positioned.fill(child: canvas),

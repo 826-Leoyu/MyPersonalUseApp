@@ -174,8 +174,9 @@ class BoardSelectionController extends Notifier<BoardSelection> {
     _show(day);
   });
 
-  /// 切换到前后 [days] 天（◀ / ▶），规则同 [showDay]。从排到它时显示的那一天
-  /// 算起：前一次还没切完时再点，也是接着往前走，不会两次切到同一天。
+  /// 切换到前后 [days] 天（Windows 的 ← / → 快捷键），规则同 [showDay]。从
+  /// 排到它时显示的那一天算起：前一次还没切完时再按，也是接着往前走，不会
+  /// 两次切到同一天。
   Future<void> showDayOffset(int days) => _switchDay(() async {
     await _finishEditing();
     _show(ref.read(displayedDayProvider).addDays(days));
