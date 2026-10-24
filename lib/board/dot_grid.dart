@@ -1,15 +1,15 @@
+import 'dart:ui' show PointMode;
+
 import 'package:flutter/material.dart';
 
 import '../app/planner_theme.dart';
 
-/// 画布背景的点阵，像 iPhone 备忘录、无边记那样：画布坐标上每隔 [spacing]
-/// 一个点，跟着 [transform] 平移和缩放，看起来点是画在画布上的。只画可视
+/// 画布背景的点阵，像 iPhone 备忘录、无边记那样：画布坐标上每隔
+/// [PlannerTheme.dotSpacing] 一个点，跟着 [transform] 平移和缩放，看起来点是
+/// 画在画布上的；点的大小不随缩放变（[PlannerTheme.dotRadius]）。只画可视
 /// 区域里的点，不接收点击。
 class DotGrid extends StatelessWidget {
   const DotGrid({super.key, required this.transform});
-
-  /// 点的间距（画布坐标）。
-  static const spacing = 24.0;
 
   /// 画布的平移和缩放。
   final TransformationController transform;
@@ -27,7 +27,7 @@ class DotGrid extends StatelessWidget {
 /// [transform] 是画布坐标到屏幕坐标的变换，只用平移和统一的缩放。
 Iterable<Offset> dotGridPositions(Size size, Matrix4 transform) sync* {
   final scale = transform.getMaxScaleOnAxis();
-  final step = DotGrid.spacing * scale;
+  final step = PlannerTheme.dotSpacing * scale;
   final translation = transform.getTranslation();
   // 第一个点：原点那个点往左上挪整数个间距，挪到不小于 0 的最小位置。
   final startX = translation.x % step;
@@ -44,15 +44,19 @@ class _DotGridPainter extends CustomPainter {
 
   final TransformationController transform;
 
-  /// 点的半径（屏幕上的逻辑像素），缩放时不变。
-  static const _radius = 1.25;
-
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = PlannerTheme.dot;
-    for (final dot in dotGridPositions(size, transform.value)) {
-      canvas.drawCircle(dot, _radius, paint);
-    }
+    // 缩小时一屏有上万个点，一次 drawPoints 画完，不逐个 drawCircle；圆头的
+    // 线宽就是点的直径。
+    final paint = Paint()
+      ..color = PlannerTheme.dot
+      ..strokeWidth = 2 * PlannerTheme.dotRadius
+      ..strokeCap = StrokeCap.round;
+    canvas.drawPoints(
+      PointMode.points,
+      dotGridPositions(size, transform.value).toList(),
+      paint,
+    );
   }
 
   @override

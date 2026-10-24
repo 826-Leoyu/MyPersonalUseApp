@@ -1,6 +1,7 @@
 import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../app/planner_theme.dart';
 import '../planner/card_colors.dart';
 
 /// 打开卡片的色板：8 种预设色和「自定义」。点预设色、或者在自定义色轮上
@@ -125,7 +126,7 @@ class _Swatch extends StatelessWidget {
           decoration: BoxDecoration(
             color: Color(argb),
             shape: BoxShape.circle,
-            border: Border.all(color: Colors.black12),
+            border: Border.all(color: PlannerTheme.swatchBorder),
           ),
           child: selected
               ? Icon(Icons.check, color: Color(cardTextColorArgb(argb)))

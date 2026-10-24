@@ -45,7 +45,8 @@ class _DateListState extends ConsumerState<DateList> {
   static const _headerHeight = 36.0;
 
   /// 一周占的高度：每一周一样高，翻周时可以直接算出滚到哪里。
-  static const _weekExtent = _headerHeight + 7 * _rowHeight + 8;
+  static const _weekExtent =
+      _headerHeight + 7 * _rowHeight + PlannerTheme.space2;
 
   /// 滚动位置 0 是建好时显示的那一天所在的一周，往上是更早的周。
   late final DayKey _anchor = _weekStart(ref.read(displayedDayProvider));
@@ -165,7 +166,7 @@ class _Week extends ConsumerWidget {
     final counts = ref.watch(weekCountsProvider(start)).value;
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: PlannerTheme.space3),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -174,7 +175,10 @@ class _Week extends ConsumerWidget {
             child: Align(
               alignment: AlignmentDirectional.bottomStart,
               child: Padding(
-                padding: const EdgeInsetsDirectional.only(start: 4, bottom: 6),
+                padding: const EdgeInsetsDirectional.only(
+                  start: PlannerTheme.space1,
+                  bottom: PlannerTheme.space2,
+                ),
                 child: Text(
                   '${formatShortDate(start)} – '
                   '${formatShortDate(start.addDays(6))}',
@@ -234,7 +238,7 @@ class _DayRow extends StatelessWidget {
       button: true,
       selected: selected,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
+        padding: const EdgeInsets.symmetric(vertical: PlannerTheme.space1),
         child: Material(
           color: selected ? PlannerTheme.selectedDay : Colors.transparent,
           borderRadius: PlannerTheme.rowRadius,
@@ -242,7 +246,9 @@ class _DayRow extends StatelessWidget {
           child: InkWell(
             onTap: onTap,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.symmetric(
+                horizontal: PlannerTheme.space3,
+              ),
               child: Row(
                 children: [
                   SizedBox(
@@ -265,7 +271,7 @@ class _DayRow extends StatelessWidget {
                     ),
                   ),
                   if (isToday) ...[
-                    const SizedBox(width: 8),
+                    const SizedBox(width: PlannerTheme.space2),
                     Text(
                       '今天',
                       style: textTheme.labelSmall?.copyWith(

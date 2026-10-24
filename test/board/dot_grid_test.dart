@@ -1,22 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:my_personal_use_app/app/planner_theme.dart';
 import 'package:my_personal_use_app/board/board_canvas.dart';
 import 'package:my_personal_use_app/board/dot_grid.dart';
 
 import 'board_harness.dart';
 
-/// 画布背景的点阵：画布坐标上每隔 [DotGrid.spacing] 一个点，跟着画布平移和
+/// 画布背景的点阵：画布坐标上每隔 [PlannerTheme.dotSpacing] 一个点，跟着画布平移和
 /// 缩放，看起来点是画在画布上的（AC-5）。
 void main() {
   group('点的位置', () {
     const size = Size(100, 60);
 
-    test('没有平移和缩放时，从左上角起每隔 spacing 一个点', () {
+    test('没有平移和缩放时，从左上角起每隔一个间距一个点', () {
       final dots = dotGridPositions(size, Matrix4.identity()).toList();
 
       expect(dots.first, Offset.zero);
-      expect(dots, contains(const Offset(DotGrid.spacing, 0)));
-      expect(dots, contains(const Offset(0, DotGrid.spacing)));
+      expect(dots, contains(const Offset(PlannerTheme.dotSpacing, 0)));
+      expect(dots, contains(const Offset(0, PlannerTheme.dotSpacing)));
       expect(dots.every((d) => size.contains(d)), isTrue);
     });
 
@@ -26,8 +27,8 @@ void main() {
         Matrix4.translationValues(10, -5, 0),
       ).toList();
 
-      expect(dots.first, const Offset(10, DotGrid.spacing - 5));
-      expect(dots, contains(const Offset(10 + DotGrid.spacing, 19)));
+      expect(dots.first, const Offset(10, PlannerTheme.dotSpacing - 5));
+      expect(dots, contains(const Offset(10 + PlannerTheme.dotSpacing, 19)));
       expect(dots.every((d) => size.contains(d)), isTrue);
     });
 
@@ -48,7 +49,7 @@ void main() {
       ).toList();
 
       expect(dots.first, Offset.zero);
-      expect(dots[1], const Offset(2 * DotGrid.spacing, 0));
+      expect(dots[1], const Offset(2 * PlannerTheme.dotSpacing, 0));
     });
   });
 

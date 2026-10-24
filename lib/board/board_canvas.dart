@@ -1420,7 +1420,7 @@ class _CardViewState extends State<_CardView> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(child: content),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: PlannerTheme.space2),
                       _CarriedOverTag(
                         key: BoardCanvas.carriedOverTagKey(card.id),
                         textColor: textColor,
@@ -1593,10 +1593,10 @@ class _CarriedOverTag extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         border: Border.all(color: color),
-        borderRadius: const BorderRadius.all(Radius.circular(4)),
+        borderRadius: PlannerTheme.tagRadius,
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+        padding: PlannerTheme.tagPadding,
         child: Text(
           '顺延',
           style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color),
@@ -1667,12 +1667,7 @@ class _CardFrame extends StatelessWidget {
             : null,
         boxShadow: [
           if (lifted) ...PlannerTheme.liftShadow,
-          if (glow)
-            BoxShadow(
-              color: PlannerTheme.accent.withValues(alpha: 0.6),
-              blurRadius: 16,
-              spreadRadius: 2,
-            ),
+          if (glow) ...PlannerTheme.glowShadow,
         ],
       ),
       child: Padding(
