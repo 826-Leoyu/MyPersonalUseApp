@@ -108,7 +108,7 @@ final displayedDayProvider = NotifierProvider<DisplayedDayController, DayKey>(
 /// 管理画布上的选中和编辑状态，把点击翻译成对 PlannerService 的调用。
 class BoardSelectionController extends Notifier<BoardSelection> {
   /// 正在进行的保存；保存完成前再次退出编辑时等它，不重复保存。
-  Future<void>? _saving;
+  Future<String?>? _saving;
 
   /// 最后一次排上队的切换日期。切换日期按先后顺序一个一个完成，后来的
   /// 不会被先来的、还没查完的覆盖掉。
@@ -255,9 +255,17 @@ class BoardSelectionController extends Notifier<BoardSelection> {
   /// 取消选中。
   ///
   /// 保存失败时抛出 PlannerException，仍然停在编辑状态，内容不丢。
-  Future<void> leaveBoard() async {
-    await _finishEditing();
+  Future<void> leaveBoard() => stopEditing();
+
+  /// 保存正在编辑的内容并退出编辑，取消选中，返回编辑的那张卡片的 id
+  /// （新卡片是刚建好的那张）。标题为空的新卡片丢弃，返回 null；没在编辑时
+  /// 也返回 null。
+  ///
+  /// 保存失败时抛出 PlannerException，仍然停在编辑状态，内容不丢。
+  Future<String?> stopEditing() async {
+    final cardId = await _finishEditing();
     state = const NothingSelected();
+    return cardId;
   }
 
   /// 单击空白处：和离开画布一样，退出编辑并保存，取消选中。
@@ -282,21 +290,28 @@ class BoardSelectionController extends Notifier<BoardSelection> {
     );
   }
 
-  /// 正在编辑时保存编辑的内容；没有在编辑时什么也不做。
-  Future<void> _finishEditing() =>
+  /// 正在编辑时保存编辑的内容，返回编辑的那张卡片的 id；没有在编辑时什么
+  /// 也不做，返回 null。
+  Future<String?> _finishEditing() =>
       _saving ??= _saveEditing().whenComplete(() => _saving = null);
 
-  Future<void> _saveEditing() async {
+  Future<String?> _saveEditing() async {
     final editing = state;
-    if (editing is! Editing) return;
+    if (editing is! Editing) return null;
     final title = editing.title.trim();
     // 标题为空：新卡片丢弃，已有的卡片保留原来的内容。
-    if (title.isEmpty) return;
+    if (title.isEmpty) {
+      return switch (editing) {
+        EditingCard(:final cardId) => cardId,
+        EditingNewCard() => null,
+      };
+    }
     final note = editing.note.trim().isEmpty ? null : editing.note;
     final service = await ref.read(plannerServiceProvider.future);
     switch (editing) {
       case EditingCard(:final cardId):
         await service.updateCardContent(cardId, title: title, note: note);
+        return cardId;
       case EditingNewCard(:final x, :final y):
         final card = await service.createCard(
           _dayForNewCard(),
@@ -304,11 +319,12 @@ class BoardSelectionController extends Notifier<BoardSelection> {
           y: y,
           title: title,
         );
-        if (note == null) return;
+        if (note == null) return card.id;
         // 卡片已经建好，接下来只是补上备注。补备注失败时停在编辑这张卡片的
         // 状态，再次保存只会更新它，不会再新建一张。
         state = EditingCard._(card.id, editing.title, editing.note);
         await service.updateCardContent(card.id, title: title, note: note);
+        return card.id;
     }
   }
 
