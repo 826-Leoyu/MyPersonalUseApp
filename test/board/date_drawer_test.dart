@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:my_personal_use_app/board/board_canvas.dart';
 import 'package:my_personal_use_app/board/board_page.dart';
 import 'package:my_personal_use_app/board/date_drawer.dart';
+import 'package:my_personal_use_app/board/date_list.dart';
 import 'package:my_personal_use_app/planner/day_key.dart';
 import 'package:my_personal_use_app/planner/task_card.dart';
 
@@ -29,13 +30,11 @@ void main() {
 
   Finder drawer() => find.byType(DateDrawer);
 
-  Finder rowOf(DayKey day) => find.byKey(DateDrawer.dayKey(day));
+  Finder rowOf(DayKey day) => find.byKey(DateList.dayKey(day));
 
   /// [day] 那一行里的未完成数。
-  Finder countIn(DayKey day) => find.descendant(
-    of: rowOf(day),
-    matching: find.byKey(DateDrawer.countKey),
-  );
+  Finder countIn(DayKey day) =>
+      find.descendant(of: rowOf(day), matching: find.byKey(DateList.countKey));
 
   String? countTextIn(WidgetTester tester, DayKey day) =>
       tester.widget<Text>(countIn(day)).data;
@@ -272,7 +271,7 @@ void main() {
       await openDrawer(tester);
       expect(rowOf(DayKey(2026, 12, 1)), findsOneWidget);
 
-      await tapAndSettle(tester, find.byKey(DateDrawer.todayButtonKey));
+      await tapAndSettle(tester, find.byKey(DateList.todayButtonKey));
 
       expect(drawer(), findsNothing);
       expect(titleOf('Tue, Oct 20, 2026 · 今天'), findsOneWidget);

@@ -28,19 +28,25 @@ import 'drop_zones.dart';
 import 'link_layer.dart';
 import 'undo_delete_notice.dart';
 
+/// 用画布 [body] 搭出页面的外框。[dragging] 时按住了卡片，不从边缘拉出抽屉。
+typedef BoardShellBuilder = Widget Function({
+  required Widget body,
+  Widget? floatingActionButton,
+  required bool dragging,
+});
+
 /// 一天的画布：卡片按坐标绝对定位显示。
 ///
 /// 按住卡片拖动移动它，在空白处拖动平移；双指捏合（Android）或 Ctrl+鼠标滚轮（Windows）缩放，
 /// 不按 Ctrl 滚动滚轮不缩放。双击空白处新建卡片，单击空白处退出编辑、
 /// 取消选中。
 ///
-/// 画布带着页面的 Scaffold：「＋」放在 Scaffold 的悬浮按钮位置，提示出现时
-/// 由 Scaffold 把它让到提示上面，两者不会互相遮挡。
+/// 画布带着页面的 Scaffold（由 [shell] 搭好）：「＋」放在 Scaffold 的悬浮按钮
+/// 位置，提示出现时由 Scaffold 把它让到提示上面，两者不会互相遮挡。
 class BoardCanvas extends ConsumerStatefulWidget {
   const BoardCanvas({
     super.key,
-    required this.appBar,
-    required this.drawer,
+    required this.shell,
     required this.board,
     required this.canCreateCards,
     required this.transform,
@@ -86,11 +92,8 @@ class BoardCanvas extends ConsumerStatefulWidget {
   static const minScale = 0.5;
   static const maxScale = 3.0;
 
-  /// 页面顶部的标题栏。
-  final PreferredSizeWidget appBar;
-
-  /// 左侧的日期抽屉，盖在画布上面，不挤动卡片。
-  final Widget drawer;
+  /// 搭页面的外框（页头、日期抽屉或侧栏），见 `BoardShell`。
+  final BoardShellBuilder shell;
 
   final DayBoard board;
 
@@ -1091,12 +1094,9 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
         ),
       ),
     );
-    final page = Scaffold(
-      appBar: widget.appBar,
-      drawer: widget.drawer,
-      drawerEdgeDragWidth: drawerEdgeDragWidth(context),
+    final page = widget.shell(
       // 按住卡片时不从边缘拉出抽屉。
-      drawerEnableOpenDragGesture: _dragPointerId == null,
+      dragging: _dragPointerId != null,
       body: Stack(
         children: [
           Positioned.fill(child: canvas),
