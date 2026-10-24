@@ -58,7 +58,9 @@ class _DailyMaintenanceState extends ConsumerState<DailyMaintenance> {
       }
     }
     try {
-      await service.runDailyMaintenance();
+      final summary = await service.runDailyMaintenance();
+      // 卡片搬到了今天，之前的操作不再撤销。
+      if (summary.carriedCount > 0) selection.clearUndo();
     } on StorageFailure {
       // 写不进去时不提示，下次回到前台再维护。
     }
