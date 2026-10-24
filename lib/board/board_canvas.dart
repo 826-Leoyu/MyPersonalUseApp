@@ -22,6 +22,7 @@ import 'card_color_dialog.dart';
 import 'card_drag.dart';
 import 'carry_over_record_view.dart';
 import 'completed_page.dart';
+import 'date_bar.dart';
 import 'drop_zones.dart';
 import 'link_layer.dart';
 import 'undo_delete_notice.dart';
@@ -175,6 +176,104 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
 
   BoardSelectionController get _selection =>
       ref.read(boardSelectionProvider.notifier);
+
+  /// 不在编辑时接住快捷键的焦点。编辑时焦点在编辑框里，快捷键从编辑框
+  /// 往上传到这里。
+  final _keyboardFocus = FocusNode(debugLabel: '画布快捷键');
+
+  /// 让画布接住快捷键：退出编辑后编辑框的焦点没了，要拿回来。上面盖着
+  /// 别的页面或菜单时不抢它们的焦点。
+  void _takeKeyboardFocus() {
+    if (!mounted || !(ModalRoute.of(context)?.isCurrent ?? true)) return;
+    if (!_keyboardFocus.hasFocus) _keyboardFocus.requestFocus();
+  }
+
+  /// Windows 上的快捷键。编辑时只留下 Esc、Ctrl+Enter 和 Ctrl+N，其余的
+  /// 键交给编辑框打字。
+  Map<ShortcutActivator, VoidCallback> _shortcuts(BoardSelection selection) {
+    if (defaultTargetPlatform != TargetPlatform.windows) return const {};
+    final selectedCard = switch (selection) {
+      CardSelected(:final cardId) => _boardCard(cardId),
+      _ => null,
+    };
+    return {
+      if (selectedCard != null) ...{
+        const SingleActivator(
+          LogicalKeyboardKey.delete,
+          includeRepeats: false,
+        ): () =>
+            _finishCard(selectedCard, _Finish.delete),
+        const SingleActivator(
+          LogicalKeyboardKey.backspace,
+          includeRepeats: false,
+        ): () =>
+            _finishCard(selectedCard, _Finish.delete),
+        const SingleActivator(
+          LogicalKeyboardKey.enter,
+          includeRepeats: false,
+        ): () =>
+            _save(() => _selection.editCard(selectedCard)),
+        const SingleActivator(
+          LogicalKeyboardKey.enter,
+          control: true,
+          includeRepeats: false,
+        ): () =>
+            _finishCard(selectedCard, _Finish.complete),
+      },
+      if (selection is Editing)
+        const SingleActivator(
+          LogicalKeyboardKey.enter,
+          control: true,
+          includeRepeats: false,
+        ): _completeEditedCard,
+      if (selection is! Editing) ...{
+        const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
+            switchDay(context, ref, (s) => s.showDayOffset(-1)),
+        const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
+            switchDay(context, ref, (s) => s.showDayOffset(1)),
+        const SingleActivator(LogicalKeyboardKey.keyT, includeRepeats: false):
+            _showToday,
+      },
+      // 编辑时保存并退出编辑，不在编辑时取消选中。
+      const SingleActivator(
+        LogicalKeyboardKey.escape,
+        includeRepeats: false,
+      ): () =>
+          _save(_selection.leaveBoard),
+      // 过去的日期不能新建卡片。
+      if (widget.canCreateCards)
+        const SingleActivator(
+          LogicalKeyboardKey.keyN,
+          control: true,
+          includeRepeats: false,
+        ): _onAddCard,
+    };
+  }
+
+  /// 按 T 回到今天。和「今天」按钮一样，已经在今天时什么都不做。
+  void _showToday() {
+    final today = ref.read(todayProvider);
+    if (ref.read(displayedDayProvider) == today) return;
+    switchDay(context, ref, (s) => s.showDay(today));
+  }
+
+  /// 编辑时按 Ctrl+Enter：先保存编辑的内容并退出编辑（新卡片先建好），保存
+  /// 成功再完成卡片。标题为空的新卡片丢弃，不完成。
+  Future<void> _completeEditedCard() async {
+    String? cardId;
+    if (!await _save(() async => cardId = await _selection.stopEditing())) {
+      return;
+    }
+    final id = cardId;
+    if (id == null || !mounted) return;
+    // 刚建好的卡片还没出现在画布上，直接完成，不播退场动画。
+    switch (_boardCard(id)) {
+      case final card?:
+        await _finishCard(card, _Finish.complete);
+      case null:
+        await _save(() => _selection.completeCard(id));
+    }
+  }
 
   /// Ctrl+滚轮：以指针位置为中心缩放，缩放比例限制在上下限以内。
   void _onPointerSignal(PointerSignalEvent event) {
@@ -614,6 +713,10 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
   @override
   void initState() {
     super.initState();
+    // 换一天时画布重建，快捷键的焦点跟着换到新画布上。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (ref.read(boardSelectionProvider) is! Editing) _takeKeyboardFocus();
+    });
     // 点历史记录跳到另一天时，画布按 ValueKey(day) 重建，这时卡片已经选中了：
     // 等画布排好版，让它露出来。
     if (ref.read(boardSelectionProvider) case CardSelected(:final cardId)) {
@@ -764,6 +867,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
   void dispose() {
     _armTimer?.cancel();
     _bounceAnimation.dispose();
+    _keyboardFocus.dispose();
     super.dispose();
   }
 
@@ -771,6 +875,9 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
   Widget build(BuildContext context) {
     final cards = widget.board.cards;
     final selection = ref.watch(boardSelectionProvider);
+    ref.listen(boardSelectionProvider, (_, next) {
+      if (next is! Editing) _takeKeyboardFocus();
+    });
     final shown = _shownCards();
     // 正在拖动、刚松手还在保存、或者正在弹回的卡片显示在临时位置，画在所有
     // 卡片上面。
@@ -932,7 +1039,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
         ),
       ),
     );
-    return Scaffold(
+    final page = Scaffold(
       appBar: widget.appBar,
       body: Stack(
         children: [
@@ -962,6 +1069,11 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
               child: const Icon(Icons.add),
             )
           : null,
+    );
+    // 快捷键放在焦点外面：焦点在画布或编辑框上时都能收到。
+    return CallbackShortcuts(
+      bindings: _shortcuts(selection),
+      child: Focus(focusNode: _keyboardFocus, child: page),
     );
   }
 }
