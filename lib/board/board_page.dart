@@ -92,7 +92,6 @@ class _BoardPageState extends ConsumerState<BoardPage> {
       // 窄屏上放不下时整体缩小，不截断、不和右边的按钮重叠。
       title: FittedBox(
         fit: BoxFit.scaleDown,
-        alignment: AlignmentDirectional.centerStart,
         child: Text(
           day == today ? '${formatFullDate(day)} · 今天' : formatFullDate(day),
           maxLines: 1,

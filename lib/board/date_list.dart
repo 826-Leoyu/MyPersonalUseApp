@@ -8,8 +8,8 @@ import '../planner/day_key.dart';
 import 'board_selection.dart';
 
 /// 日期列表：按周分组竖着列出日期（周一到周日），可以一直往前后滚，顶部有
-/// 上一周、下一周和「今天」。画布正在显示的那一天用强调色填充，今天用强调色
-/// 描边并标上「今天」，每一行带未完成数。
+/// 上一周、下一周和「今天」。画布正在显示的那一天用米色高亮、文字加粗，今天
+/// 用强调色标上「今天」，每一行带未完成数。
 ///
 /// 窄屏的日期抽屉（`DateDrawer`）和宽屏的日期侧栏（`DateSidebar`）都用它。
 /// 从建好时显示的那一天所在的一周开始。
@@ -45,7 +45,8 @@ class _DateListState extends ConsumerState<DateList> {
   static const _headerHeight = 36.0;
 
   /// 一周占的高度：每一周一样高，翻周时可以直接算出滚到哪里。
-  static const _weekExtent = _headerHeight + 7 * _rowHeight + 8;
+  static const _weekExtent =
+      _headerHeight + 7 * _rowHeight + PlannerTheme.space2;
 
   /// 滚动位置 0 是建好时显示的那一天所在的一周，往上是更早的周。
   late final DayKey _anchor = _weekStart(ref.read(displayedDayProvider));
@@ -85,7 +86,12 @@ class _DateListState extends ConsumerState<DateList> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsetsDirectional.fromSTEB(16, 8, 8, 8),
+          padding: const EdgeInsetsDirectional.fromSTEB(
+            PlannerTheme.space4,
+            PlannerTheme.space2,
+            PlannerTheme.space2,
+            PlannerTheme.space2,
+          ),
           child: Row(
             children: [
               Expanded(child: Text('选择日期', style: textTheme.titleMedium)),
@@ -107,7 +113,11 @@ class _DateListState extends ConsumerState<DateList> {
             ],
           ),
         ),
-        const Divider(height: 1),
+        const Divider(
+          height: 1,
+          indent: PlannerTheme.space4,
+          endIndent: PlannerTheme.space4,
+        ),
         Expanded(
           child: CustomScrollView(
             controller: _scroll,
@@ -156,7 +166,7 @@ class _Week extends ConsumerWidget {
     final counts = ref.watch(weekCountsProvider(start)).value;
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: PlannerTheme.space3),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -165,12 +175,15 @@ class _Week extends ConsumerWidget {
             child: Align(
               alignment: AlignmentDirectional.bottomStart,
               child: Padding(
-                padding: const EdgeInsetsDirectional.only(start: 4, bottom: 6),
+                padding: const EdgeInsetsDirectional.only(
+                  start: PlannerTheme.space1,
+                  bottom: PlannerTheme.space2,
+                ),
                 child: Text(
                   '${formatShortDate(start)} – '
                   '${formatShortDate(start.addDays(6))}',
                   style: theme.textTheme.labelMedium?.copyWith(
-                    color: theme.hintColor,
+                    color: PlannerTheme.secondaryText,
                   ),
                 ),
               ),
@@ -217,29 +230,25 @@ class _DayRow extends StatelessWidget {
     final label = formatDateDrawerLabel(day);
     final theme = Theme.of(context);
     final textTheme = theme.textTheme;
-    final color = selected ? Colors.white : null;
     final count = activeCount;
+    final weight = selected ? FontWeight.bold : null;
     return Semantics(
       key: DateList.dayKey(day),
       container: true,
       button: true,
       selected: selected,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
+        padding: const EdgeInsets.symmetric(vertical: PlannerTheme.space1),
         child: Material(
-          color: selected ? PlannerTheme.accent : Colors.transparent,
-          shape: RoundedRectangleBorder(
-            borderRadius: const BorderRadius.all(Radius.circular(8)),
-            // 今天但没选中时描边，和选中的填充区分开。
-            side: isToday && !selected
-                ? const BorderSide(color: PlannerTheme.accent, width: 1.5)
-                : BorderSide.none,
-          ),
+          color: selected ? PlannerTheme.selectedDay : Colors.transparent,
+          borderRadius: PlannerTheme.rowRadius,
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: onTap,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.symmetric(
+                horizontal: PlannerTheme.space3,
+              ),
               child: Row(
                 children: [
                   SizedBox(
@@ -247,23 +256,26 @@ class _DayRow extends StatelessWidget {
                     child: Text(
                       label.weekday,
                       style: textTheme.bodyMedium?.copyWith(
-                        color: color ?? theme.hintColor,
+                        color: selected
+                            ? PlannerTheme.text
+                            : PlannerTheme.secondaryText,
+                        fontWeight: weight,
                       ),
                     ),
                   ),
                   Text(
                     label.date,
                     style: textTheme.bodyLarge?.copyWith(
-                      color: color,
-                      fontWeight: isToday ? FontWeight.bold : null,
+                      color: PlannerTheme.text,
+                      fontWeight: weight,
                     ),
                   ),
                   if (isToday) ...[
-                    const SizedBox(width: 8),
+                    const SizedBox(width: PlannerTheme.space2),
                     Text(
                       '今天',
                       style: textTheme.labelSmall?.copyWith(
-                        color: color ?? PlannerTheme.accent,
+                        color: PlannerTheme.accentText,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -275,9 +287,9 @@ class _DayRow extends StatelessWidget {
                       key: DateList.countKey,
                       style: textTheme.labelLarge?.copyWith(
                         color: count == 0
-                            ? (color ?? theme.hintColor).withValues(alpha: 0.6)
-                            : (color ?? PlannerTheme.accent),
-                        fontWeight: count == 0 ? null : FontWeight.bold,
+                            ? PlannerTheme.secondaryText.withValues(alpha: 0.6)
+                            : PlannerTheme.text,
+                        fontWeight: count == 0 ? null : FontWeight.w600,
                       ),
                     ),
                 ],

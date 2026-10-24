@@ -47,7 +47,7 @@ class CarryOverRecordView extends StatelessWidget {
                 borderRadius: PlannerTheme.cardRadius,
               ),
               child: Padding(
-                padding: const EdgeInsets.all(12),
+                padding: PlannerTheme.cardPadding,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [

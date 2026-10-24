@@ -24,6 +24,7 @@ import 'card_drag.dart';
 import 'carry_over_record_view.dart';
 import 'completed_page.dart';
 import 'date_drawer.dart';
+import 'dot_grid.dart';
 import 'drop_zones.dart';
 import 'link_layer.dart';
 import 'undo_delete_notice.dart';
@@ -1051,6 +1052,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
                   onCompleted: () => _onLeft(card.id),
                   selected:
                       selection is CardSelected && selection.cardId == card.id,
+                  dragging: _drag.dragged?.cardId == card.id,
                   editing:
                       selection is EditingCard && selection.cardId == card.id
                       ? selection
@@ -1083,6 +1085,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
                       onPointerDown: (_) => _downOn = const _DownOnDraft(),
                       child: _CardFrame(
                         colorArgb: TaskCard.defaultColorArgb,
+                        outlined: true,
                         builder: (textColor) =>
                             _CardEditor(editing: draft, textColor: textColor),
                       ),
@@ -1099,6 +1102,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       dragging: _dragPointerId != null,
       body: Stack(
         children: [
+          Positioned.fill(child: DotGrid(transform: _transform)),
           Positioned.fill(child: canvas),
           if (selectedLink != null)
             _linkScissors(selectedLink, curves[selectedLink]!),
@@ -1197,9 +1201,9 @@ class _Scissors extends StatelessWidget {
       decoration: BoxDecoration(
         color: PlannerTheme.accent,
         shape: BoxShape.circle,
-        boxShadow: PlannerTheme.cardShadow,
+        boxShadow: PlannerTheme.liftShadow,
       ),
-      child: Icon(Icons.content_cut, size: 18, color: Colors.white),
+      child: Icon(Icons.content_cut, size: 18, color: PlannerTheme.onAccent),
     ),
   );
 }
@@ -1252,6 +1256,7 @@ class _CardView extends StatefulWidget {
     required this.completing,
     required this.onCompleted,
     required this.selected,
+    required this.dragging,
     required this.editing,
     required this.box,
     required this.onTap,
@@ -1276,6 +1281,9 @@ class _CardView extends StatefulWidget {
   final VoidCallback onCompleted;
 
   final bool selected;
+
+  /// 正在拖着这张卡片：浮起来，带轻微阴影。
+  final bool dragging;
 
   /// 正在编辑这张卡片时不为 null，卡片上显示编辑框。
   final EditingCard? editing;
@@ -1394,6 +1402,9 @@ class _CardViewState extends State<_CardView> {
               child: _CardFrame(
                 colorArgb: card.colorArgb,
                 glow: widget.armedTarget,
+                // 编辑中的卡片也描边，和选中一样能看出是哪一张。
+                outlined: widget.selected || editing != null,
+                lifted: widget.dragging,
                 builder: (textColor) {
                   final content = switch (editing) {
                     final editing? => _CardEditor(
@@ -1409,7 +1420,7 @@ class _CardViewState extends State<_CardView> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(child: content),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: PlannerTheme.space2),
                       _CarriedOverTag(
                         key: BoardCanvas.carriedOverTagKey(card.id),
                         textColor: textColor,
@@ -1582,10 +1593,10 @@ class _CarriedOverTag extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         border: Border.all(color: color),
-        borderRadius: const BorderRadius.all(Radius.circular(4)),
+        borderRadius: PlannerTheme.tagRadius,
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+        padding: PlannerTheme.tagPadding,
         child: Text(
           '顺延',
           style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color),
@@ -1617,18 +1628,26 @@ class _ResizeHandle extends StatelessWidget {
   }
 }
 
-/// 卡片的底色、圆角、阴影和内边距。
+/// 卡片的底色、圆角、描边、阴影和内边距。平时没有阴影。
 class _CardFrame extends StatelessWidget {
   const _CardFrame({
     required this.colorArgb,
     required this.builder,
     this.glow = false,
+    this.outlined = false,
+    this.lifted = false,
   });
 
   final int colorArgb;
 
   /// 外面加一圈强调色的光晕。
   final bool glow;
+
+  /// 选中、编辑中：强调色描边。
+  final bool outlined;
+
+  /// 拖动中：轻微阴影，看起来浮在别的卡片上面。
+  final bool lifted;
 
   /// 卡片里的内容，拿到按底色决定的文字颜色（见 [cardTextColorArgb]）。
   final Widget Function(Color textColor) builder;
@@ -1639,19 +1658,20 @@ class _CardFrame extends StatelessWidget {
       decoration: BoxDecoration(
         color: Color(colorArgb),
         borderRadius: PlannerTheme.cardRadius,
-        boxShadow: glow
-            ? [
-                ...PlannerTheme.cardShadow,
-                BoxShadow(
-                  color: PlannerTheme.accent.withValues(alpha: 0.6),
-                  blurRadius: 16,
-                  spreadRadius: 2,
-                ),
-              ]
-            : PlannerTheme.cardShadow,
+        border: outlined
+            ? Border.all(
+                color: PlannerTheme.accent,
+                width: PlannerTheme.selectedBorderWidth,
+                strokeAlign: BorderSide.strokeAlignOutside,
+              )
+            : null,
+        boxShadow: [
+          if (lifted) ...PlannerTheme.liftShadow,
+          if (glow) ...PlannerTheme.glowShadow,
+        ],
       ),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: PlannerTheme.cardPadding,
         child: builder(Color(cardTextColorArgb(colorArgb))),
       ),
     );
