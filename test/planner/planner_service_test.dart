@@ -32,7 +32,7 @@ void main() {
       final card = board.cards.single;
       expect(card.title, '买菜');
       expect((card.x, card.y), (40, 60));
-      expect(card.colorArgb, 0xFFFFF3B0);
+      expect(card.colorArgb, 0xFFFFF0B8);
       expect((card.width, card.height), (180, 88));
     });
 
@@ -508,7 +508,7 @@ void main() {
         expect((unchanged.x, unchanged.y), (0, 0));
         expect(unchanged.zIndex, card.zIndex);
         expect((unchanged.width, unchanged.height), (180, 88));
-        expect(unchanged.colorArgb, 0xFFFFF3B0);
+        expect(unchanged.colorArgb, 0xFFFFF0B8);
       });
 
       test('写入失败时 $name 遇到不存在的卡片仍然报 NotFound', () async {

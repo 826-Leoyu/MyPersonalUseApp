@@ -16,7 +16,7 @@ void main() {
     });
 
     test('默认的淡黄背景用近黑色', () {
-      expect(cardTextColorArgb(0xFFFFF3B0), CardColors.darkText);
+      expect(cardTextColorArgb(0xFFFFF0B8), CardColors.darkText);
     });
 
     test('亮度刚过 0.5 的灰（约 0.503）用近黑色', () {

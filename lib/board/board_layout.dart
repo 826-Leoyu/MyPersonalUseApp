@@ -12,8 +12,9 @@ const wideLayoutMinWidth = 840.0;
 /// 宽屏时展开的日期侧栏的宽度。
 const dateSidebarWidth = 304.0;
 
-/// 宽屏左侧常驻的日期侧栏，里面是 [DateList]。点某一天直接交给 [onSelect]，
-/// 不用等关上的动画。
+/// 宽屏左侧常驻的日期侧栏：浅灰的圆角面板，里面是 [DateList]。点某一天直接
+/// 交给 [onSelect]，不用等关上的动画。宽度连同四周的留白一共是
+/// [dateSidebarWidth]。
 class DateSidebar extends StatelessWidget {
   const DateSidebar({super.key, required this.onSelect});
 
@@ -23,9 +24,22 @@ class DateSidebar extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SizedBox(
     width: dateSidebarWidth,
-    child: Material(
-      color: PlannerTheme.paper,
-      child: SafeArea(right: false, child: DateList(onSelect: onSelect)),
+    child: SafeArea(
+      right: false,
+      child: Padding(
+        padding: const EdgeInsetsDirectional.fromSTEB(
+          PlannerTheme.space3,
+          PlannerTheme.space3,
+          0,
+          PlannerTheme.space3,
+        ),
+        child: Material(
+          color: PlannerTheme.panel,
+          borderRadius: PlannerTheme.panelRadius,
+          clipBehavior: Clip.antiAlias,
+          child: DateList(onSelect: onSelect),
+        ),
+      ),
     ),
   );
 }

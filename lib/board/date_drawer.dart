@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../app/planner_theme.dart';
 import '../planner/day_key.dart';
 import '../planner/planner_exceptions.dart';
 import 'board_selection.dart';
@@ -72,7 +71,6 @@ class _DateDrawerState extends State<DateDrawer> {
 
   @override
   Widget build(BuildContext context) => Drawer(
-    backgroundColor: PlannerTheme.paper,
     child: SafeArea(child: DateList(onSelect: _select)),
   );
 }
