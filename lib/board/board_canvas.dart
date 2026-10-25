@@ -1677,7 +1677,8 @@ class _CardFrame extends StatelessWidget {
             : null,
         boxShadow: [
           if (lifted) ...PlannerTheme.liftShadow,
-          if (glow) ...PlannerTheme.glowShadow,
+          if (glow)
+            ...PlannerTheme.glowShadow(PlannerColors.of(context).accent),
         ],
       ),
       child: Padding(

@@ -91,7 +91,7 @@ void main() {
         .style
         ?.color;
 
-    testWidgets('便签仍然是保存的浅色，文字仍然是近黑色；保存的颜色不变', (tester) async {
+    testWidgets('浅色便签仍然显示保存的颜色，文字仍然是近黑色', (tester) async {
       tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
       addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
       final card = await harness.seed(

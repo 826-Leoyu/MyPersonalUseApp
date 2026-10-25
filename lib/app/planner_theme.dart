@@ -53,9 +53,13 @@ abstract final class PlannerTheme {
     BoxShadow(color: Color(0x24000000), blurRadius: 16, offset: Offset(0, 6)),
   ];
 
-  /// 卡片外面一圈强调色的光晕：[PlannerColors.accent] 的 60%。
-  static const glowShadow = [
-    BoxShadow(color: Color(0x99D9A441), blurRadius: 16, spreadRadius: 2),
+  /// 卡片外面一圈强调色的光晕：强调色 [accent] 的 60%。
+  static List<BoxShadow> glowShadow(Color accent) => [
+    BoxShadow(
+      color: accent.withValues(alpha: 0.6),
+      blurRadius: 16,
+      spreadRadius: 2,
+    ),
   ];
 
   /// 浅色主题。
@@ -75,27 +79,20 @@ abstract final class PlannerTheme {
       fabAlwaysCircular: true,
       fabSchemeColor: SchemeColor.primary,
     );
-    final schemeColors = FlexSchemeColor.from(
-      primary: colors.accent,
-      brightness: brightness,
+    final flexTheme = brightness == Brightness.light
+        ? FlexThemeData.light
+        : FlexThemeData.dark;
+    final base = flexTheme(
+      colors: FlexSchemeColor.from(
+        primary: colors.accent,
+        brightness: brightness,
+      ),
+      surface: colors.surface,
+      scaffoldBackground: colors.background,
+      appBarBackground: colors.background,
+      appBarElevation: 0,
+      subThemesData: subThemes,
     );
-    final base = brightness == Brightness.light
-        ? FlexThemeData.light(
-            colors: schemeColors,
-            surface: colors.surface,
-            scaffoldBackground: colors.background,
-            appBarBackground: colors.background,
-            appBarElevation: 0,
-            subThemesData: subThemes,
-          )
-        : FlexThemeData.dark(
-            colors: schemeColors,
-            surface: colors.surface,
-            scaffoldBackground: colors.background,
-            appBarBackground: colors.background,
-            appBarElevation: 0,
-            subThemesData: subThemes,
-          );
     return base.copyWith(
       extensions: [colors],
       dividerColor: colors.divider,
@@ -224,7 +221,7 @@ class PlannerColors extends ThemeExtension<PlannerColors> {
   /// 强调色上的文字和图标。
   final Color onAccent;
 
-  /// 日期列表里选中那一天的米色高亮。
+  /// 日期列表里选中那一天的高亮：浅色下是米色，深色下是暗金色。
   final Color selectedDay;
 
   /// 低对比的分隔线。
