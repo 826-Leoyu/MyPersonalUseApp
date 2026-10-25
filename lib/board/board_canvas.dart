@@ -101,7 +101,8 @@ class BoardCanvas extends ConsumerStatefulWidget {
   /// 能不能在这一天新建卡片。过去的日期不能。
   final bool canCreateCards;
 
-  /// 画布的平移和缩放。由页面持有，换一天时沿用，不跟着画布重建。
+  /// 这一天画布的平移和缩放。由页面按天持有，不跟着画布重建，换回这一天时
+  /// 恢复。
   final TransformationController transform;
 
   @override

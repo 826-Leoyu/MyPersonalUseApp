@@ -217,6 +217,22 @@ void main() {
       await harness.dispose(tester);
     });
 
+    testWidgets('在别的日期折叠侧栏，再切回来：卡片在屏幕上的位置还是不变', (tester) async {
+      useWindowWidth(tester, 1000);
+      final card = await seedCard(tester, x: 40, y: 60);
+      await harness.launch(tester);
+      final before = tester.getRect(cardFinder(card));
+      await harness.showDay(tester, harness.today.addDays(1));
+      await harness.settle(tester);
+
+      await toggleSidebar(tester);
+      await harness.showDay(tester, harness.today);
+      await harness.settle(tester);
+
+      expect(tester.getRect(cardFinder(card)), before);
+      await harness.dispose(tester);
+    });
+
     testWidgets('「＋」在画布可视区域（不含侧栏）的中间新建', (tester) async {
       useWindowWidth(tester, 1000);
       await harness.launch(tester);

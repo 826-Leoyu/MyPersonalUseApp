@@ -219,5 +219,89 @@ void main() {
 
       await harness.dispose(tester);
     });
+
+    group('各天独立', () {
+      late TaskCard yesterdayCard;
+
+      /// 今天和昨天在同一个位置各有一张卡片，启动时显示今天。
+      Future<void> launchWithTwoDays(WidgetTester tester) async {
+        // 过去的日期不能新建卡片：建在今天，再直接改数据库挪到昨天。先做完
+        // 今天的每日维护，启动时就不会把它顺延回今天。
+        yesterdayCard = await harness.seed(tester, (service) async {
+          await service.runDailyMaintenance();
+          return service.createCard(harness.today, title: '取快递', x: 40, y: 60);
+        });
+        await harness.moveCardToDay(
+          tester,
+          yesterdayCard.id,
+          harness.today.addDays(-1),
+        );
+        await launchWithCard(tester);
+      }
+
+      Rect yesterdayCardRect(WidgetTester tester) =>
+          tester.getRect(find.byKey(BoardCanvas.cardKey(yesterdayCard.id)));
+
+      /// 在空白处拖动平移画布 [by]。
+      Future<void> pan(WidgetTester tester, Offset by) async {
+        final gesture = await tester.startGesture(
+          blankSpot,
+          kind: PointerDeviceKind.mouse,
+        );
+        await gesture.moveBy(Offset(by.dx.sign * 20, by.dy.sign * 20));
+        await gesture.moveBy(by);
+        await gesture.up();
+        await harness.settle(tester);
+      }
+
+      testWidgets('在今天平移、缩放后切到没看过的昨天：昨天是初始视图', (tester) async {
+        await launchWithTwoDays(tester);
+        final initial = cardRect(tester);
+        await pan(tester, const Offset(100, 50));
+        await ctrlScrollWheel(tester, dy: -100);
+        expect(cardRect(tester), isNot(initial));
+
+        await harness.showDay(tester, harness.today.addDays(-1));
+        await harness.settle(tester);
+
+        expect(yesterdayCardRect(tester), initial);
+
+        await harness.dispose(tester);
+      });
+
+      testWidgets('切到昨天再切回今天：恢复离开今天时的平移和缩放', (tester) async {
+        await launchWithTwoDays(tester);
+        await pan(tester, const Offset(100, 50));
+        await ctrlScrollWheel(tester, dy: -100);
+        final leftAt = cardRect(tester);
+
+        await harness.showDay(tester, harness.today.addDays(-1));
+        await harness.settle(tester);
+        await harness.showDay(tester, harness.today);
+        await harness.settle(tester);
+
+        expect(cardRect(tester), leftAt);
+
+        await harness.dispose(tester);
+      });
+
+      testWidgets('昨天平移过，再从今天切回昨天：恢复昨天自己的视图', (tester) async {
+        await launchWithTwoDays(tester);
+        await harness.showDay(tester, harness.today.addDays(-1));
+        await harness.settle(tester);
+        await pan(tester, const Offset(-60, 80));
+        final leftYesterdayAt = yesterdayCardRect(tester);
+        await harness.showDay(tester, harness.today);
+        await harness.settle(tester);
+        await pan(tester, const Offset(150, 0));
+
+        await harness.showDay(tester, harness.today.addDays(-1));
+        await harness.settle(tester);
+
+        expect(yesterdayCardRect(tester), leftYesterdayAt);
+
+        await harness.dispose(tester);
+      });
+    });
   });
 }
