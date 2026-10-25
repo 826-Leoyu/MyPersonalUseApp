@@ -14,6 +14,8 @@ class PlannerApp extends StatelessWidget {
       title: 'MyPersonalUseApp',
       debugShowCheckedModeBanner: false,
       theme: PlannerTheme.light(),
+      darkTheme: PlannerTheme.dark(),
+      themeMode: ThemeMode.system,
       home: const DailyMaintenance(child: BoardPage()),
     );
   }

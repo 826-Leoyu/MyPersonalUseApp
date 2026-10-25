@@ -34,7 +34,7 @@ class DateSidebar extends StatelessWidget {
           PlannerTheme.space3,
         ),
         child: Material(
-          color: PlannerTheme.panel,
+          color: PlannerColors.of(context).panel,
           borderRadius: PlannerTheme.panelRadius,
           clipBehavior: Clip.antiAlias,
           child: DateList(onSelect: onSelect),

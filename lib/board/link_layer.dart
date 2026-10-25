@@ -136,9 +136,10 @@ class _LinkLayerState extends State<LinkLayer> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    final colors = PlannerColors.of(context);
     return CustomPaint(
       key: LinkLayer.paintKey,
-      painter: LinkPainter([
+      painter: LinkPainter(color: colors.link, selectedColor: colors.accent, [
         for (final (:last, :fade) in _fading.values)
           last.withOpacity(1 - fade.value),
         for (final MapEntry(key: id, value: curve) in _shown.entries)
@@ -193,9 +194,13 @@ Path _curvePath(LinkCurve curve) => Path()
 
 /// 画连线：三次贝塞尔曲线，终点（画到哪里就在哪里）画一个细箭头。
 class LinkPainter extends CustomPainter {
-  LinkPainter(this.links);
+  LinkPainter(this.links, {required this.color, required this.selectedColor});
 
   final List<PaintedLink> links;
+
+  /// 连线平时的颜色和选中时的颜色。
+  final Color color;
+  final Color selectedColor;
 
   /// 箭头两条边的长度和张开的半角。
   static const _arrowLength = 8.0;
@@ -218,7 +223,7 @@ class LinkPainter extends CustomPainter {
     final tip = metric.getTangentForOffset(drawn);
     if (tip == null) return;
 
-    final color = link.selected ? PlannerTheme.accent : PlannerTheme.linkColor;
+    final color = link.selected ? selectedColor : this.color;
     final paint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = link.selected ? 3 : 2
@@ -249,14 +254,18 @@ class LinkPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(LinkPainter oldDelegate) => oldDelegate.links != links;
+  bool shouldRepaint(LinkPainter oldDelegate) =>
+      oldDelegate.links != links ||
+      oldDelegate.color != color ||
+      oldDelegate.selectedColor != selectedColor;
 }
 
 /// 碰撞连线的预览：一条从被拖卡片指向目标卡片的虚线。
 class LinkPreviewPainter extends CustomPainter {
-  LinkPreviewPainter(this.curve);
+  LinkPreviewPainter(this.curve, {required this.color});
 
   final LinkCurve curve;
+  final Color color;
 
   /// 虚线每一段的长度和段间的空隙。
   static const _dash = 6.0;
@@ -269,7 +278,7 @@ class LinkPreviewPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2
       ..strokeCap = StrokeCap.round
-      ..color = PlannerTheme.accent;
+      ..color = color;
     for (final metric in path.computeMetrics()) {
       for (var at = 0.0; at < metric.length; at += _dash + _gap) {
         canvas.drawPath(metric.extractPath(at, at + _dash), paint);
@@ -279,5 +288,5 @@ class LinkPreviewPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(LinkPreviewPainter oldDelegate) =>
-      oldDelegate.curve != curve;
+      oldDelegate.curve != curve || oldDelegate.color != color;
 }

@@ -126,7 +126,7 @@ class _Swatch extends StatelessWidget {
           decoration: BoxDecoration(
             color: Color(argb),
             shape: BoxShape.circle,
-            border: Border.all(color: PlannerTheme.swatchBorder),
+            border: Border.all(color: PlannerColors.of(context).swatchBorder),
           ),
           child: selected
               ? Icon(Icons.check, color: Color(cardTextColorArgb(argb)))

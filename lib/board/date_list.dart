@@ -183,7 +183,7 @@ class _Week extends ConsumerWidget {
                   '${formatShortDate(start)} – '
                   '${formatShortDate(start.addDays(6))}',
                   style: theme.textTheme.labelMedium?.copyWith(
-                    color: PlannerTheme.secondaryText,
+                    color: PlannerColors.of(context).secondaryText,
                   ),
                 ),
               ),
@@ -228,10 +228,12 @@ class _DayRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final label = formatDateDrawerLabel(day);
-    final theme = Theme.of(context);
-    final textTheme = theme.textTheme;
+    final textTheme = Theme.of(context).textTheme;
+    final colors = PlannerColors.of(context);
     final count = activeCount;
+    // 选中的那一行：米色高亮，星期和日期加粗，星期用主文字的颜色。
     final weight = selected ? FontWeight.bold : null;
+    final weekdayColor = selected ? colors.primaryText : colors.secondaryText;
     return Semantics(
       key: DateList.dayKey(day),
       container: true,
@@ -240,7 +242,7 @@ class _DayRow extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: PlannerTheme.space1),
         child: Material(
-          color: selected ? PlannerTheme.selectedDay : Colors.transparent,
+          color: selected ? colors.selectedDay : Colors.transparent,
           borderRadius: PlannerTheme.rowRadius,
           clipBehavior: Clip.antiAlias,
           child: InkWell(
@@ -256,9 +258,7 @@ class _DayRow extends StatelessWidget {
                     child: Text(
                       label.weekday,
                       style: textTheme.bodyMedium?.copyWith(
-                        color: selected
-                            ? PlannerTheme.text
-                            : PlannerTheme.secondaryText,
+                        color: weekdayColor,
                         fontWeight: weight,
                       ),
                     ),
@@ -266,7 +266,7 @@ class _DayRow extends StatelessWidget {
                   Text(
                     label.date,
                     style: textTheme.bodyLarge?.copyWith(
-                      color: PlannerTheme.text,
+                      color: colors.primaryText,
                       fontWeight: weight,
                     ),
                   ),
@@ -275,7 +275,7 @@ class _DayRow extends StatelessWidget {
                     Text(
                       '今天',
                       style: textTheme.labelSmall?.copyWith(
-                        color: PlannerTheme.accentText,
+                        color: colors.accentText,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -287,8 +287,8 @@ class _DayRow extends StatelessWidget {
                       key: DateList.countKey,
                       style: textTheme.labelLarge?.copyWith(
                         color: count == 0
-                            ? PlannerTheme.secondaryText.withValues(alpha: 0.6)
-                            : PlannerTheme.text,
+                            ? colors.secondaryText.withValues(alpha: 0.6)
+                            : colors.primaryText,
                         fontWeight: count == 0 ? null : FontWeight.w600,
                       ),
                     ),

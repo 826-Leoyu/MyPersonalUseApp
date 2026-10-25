@@ -883,7 +883,10 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
           child: IgnorePointer(
             child: CustomPaint(
               key: BoardCanvas.linkPreviewKey,
-              painter: LinkPreviewPainter(curve),
+              painter: LinkPreviewPainter(
+                curve,
+                color: PlannerColors.of(context).accent,
+              ),
             ),
           ),
         ),
@@ -1195,17 +1198,20 @@ class _Scissors extends StatelessWidget {
   static const size = 32.0;
 
   @override
-  Widget build(BuildContext context) => const SizedBox.square(
-    dimension: size,
-    child: DecoratedBox(
-      decoration: BoxDecoration(
-        color: PlannerTheme.accent,
-        shape: BoxShape.circle,
-        boxShadow: PlannerTheme.liftShadow,
+  Widget build(BuildContext context) {
+    final colors = PlannerColors.of(context);
+    return SizedBox.square(
+      dimension: size,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.accent,
+          shape: BoxShape.circle,
+          boxShadow: PlannerTheme.liftShadow,
+        ),
+        child: Icon(Icons.content_cut, size: 18, color: colors.onAccent),
       ),
-      child: Icon(Icons.content_cut, size: 18, color: PlannerTheme.onAccent),
-    ),
-  );
+    );
+  }
 }
 
 /// 按下时落在了什么上，见 [_BoardCanvasState._downOn]。
@@ -1476,12 +1482,12 @@ class _CompletingCard extends StatelessWidget {
         child: Stack(
           children: [
             Positioned.fill(child: child),
-            const Center(
+            Center(
               child: Icon(
                 Icons.check_circle,
                 key: BoardCanvas.completeCheckKey,
                 size: 40,
-                color: PlannerTheme.accent,
+                color: PlannerColors.of(context).accent,
               ),
             ),
           ],
@@ -1615,13 +1621,17 @@ class _ResizeHandle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const SizedBox.square(
+    return SizedBox.square(
       dimension: size,
       child: Align(
         alignment: Alignment.bottomRight,
         child: Padding(
-          padding: EdgeInsets.all(4),
-          child: Icon(Icons.south_east, size: 16, color: PlannerTheme.accent),
+          padding: const EdgeInsets.all(4),
+          child: Icon(
+            Icons.south_east,
+            size: 16,
+            color: PlannerColors.of(context).accent,
+          ),
         ),
       ),
     );
@@ -1660,14 +1670,15 @@ class _CardFrame extends StatelessWidget {
         borderRadius: PlannerTheme.cardRadius,
         border: outlined
             ? Border.all(
-                color: PlannerTheme.accent,
+                color: PlannerColors.of(context).accent,
                 width: PlannerTheme.selectedBorderWidth,
                 strokeAlign: BorderSide.strokeAlignOutside,
               )
             : null,
         boxShadow: [
           if (lifted) ...PlannerTheme.liftShadow,
-          if (glow) ...PlannerTheme.glowShadow,
+          if (glow)
+            ...PlannerTheme.glowShadow(PlannerColors.of(context).accent),
         ],
       ),
       child: Padding(
