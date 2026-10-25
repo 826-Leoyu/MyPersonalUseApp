@@ -12,7 +12,8 @@ import 'board_selection.dart';
 /// 用强调色标上「今天」，每一行带未完成数。
 ///
 /// 窄屏的日期抽屉（`DateDrawer`）和宽屏的日期侧栏（`DateSidebar`）都用它。
-/// 从建好时显示的那一天所在的一周开始。
+/// 从建好时显示的那一天所在的一周开始。显示的那一天换了（比如用快捷键换），
+/// 而那一行没有整个露出来时，滚到能看到它。
 class DateList extends ConsumerStatefulWidget {
   const DateList({super.key, required this.onSelect});
 
@@ -80,8 +81,33 @@ class _DateListState extends ConsumerState<DateList> {
     ),
   );
 
+  /// 滚到能看到 [day] 那一行：先试着让那一周从顶上开始，列表矮得放不下一整周
+  /// 时让那一行贴着底边。已经整个露出来时不动。
+  void _reveal(DayKey day) {
+    if (!_scroll.hasClients) return;
+    final weekTop = _daysBetween(_anchor, _weekStart(day)) ~/ 7 * _weekExtent;
+    final rowTop =
+        weekTop +
+        _headerHeight +
+        _daysBetween(_weekStart(day), day) * _rowHeight;
+    final rowBottom = rowTop + _rowHeight;
+    final position = _scroll.position;
+    final top = position.pixels;
+    final bottom = top + position.viewportDimension;
+    if (rowTop >= top && rowBottom <= bottom) return;
+    final target = rowBottom - weekTop > position.viewportDimension
+        ? rowBottom - position.viewportDimension
+        : weekTop;
+    _scroll.animateTo(
+      target,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    ref.listen(displayedDayProvider, (_, day) => _reveal(day));
     final textTheme = Theme.of(context).textTheme;
     return Column(
       children: [
@@ -305,3 +331,10 @@ class _DayRow extends StatelessWidget {
 /// [day] 所在那一周的周一。
 DayKey _weekStart(DayKey day) =>
     day.addDays(1 - DateTime.utc(day.year, day.month, day.day).weekday);
+
+/// 从 [from] 到 [to] 隔了几天，[to] 在前面时是负数。
+int _daysBetween(DayKey from, DayKey to) => DateTime.utc(
+  to.year,
+  to.month,
+  to.day,
+).difference(DateTime.utc(from.year, from.month, from.day)).inDays;
