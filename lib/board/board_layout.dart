@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -49,7 +50,7 @@ class DateSidebar extends StatelessWidget {
 /// 按钮。画布和加载中的页面共用它，两种模式下的结构一样，[body] 在树里的
 /// 位置不变：跨过断点、折叠侧栏时画布不重建，编辑的内容和焦点都还在。
 ///
-/// 抽屉开着时按 Esc 关上抽屉；关着时 Esc 照常交给画布的快捷键。
+/// Windows 上抽屉开着时按 Esc 关上抽屉；关着时 Esc 照常交给画布的快捷键。
 ///
 /// 窄屏时抽屉开着、变成宽屏后，先关上抽屉（不然 Scaffold 记着抽屉开着，再变
 /// 窄时抽屉自己又出来），再调用 [onWidenedWithDrawerOpen]。
@@ -116,7 +117,8 @@ class _BoardShellState extends State<BoardShell> {
     // 抽屉开着时焦点在抽屉里，按键从抽屉往上传，先到这里，再到画布的快捷键。
     return CallbackShortcuts(
       bindings: {
-        if (_drawerOpen)
+        // 和画布的快捷键一样只在 Windows 上启用。
+        if (_drawerOpen && defaultTargetPlatform == TargetPlatform.windows)
           const SingleActivator(
             LogicalKeyboardKey.escape,
             includeRepeats: false,

@@ -63,12 +63,14 @@ class _DateListState extends ConsumerState<DateList> {
   /// 往前后翻 [weeks] 周，停在一周的开头。
   void _scrollWeeks(int weeks) {
     final current = (_scroll.offset / _weekExtent).round();
-    _scroll.animateTo(
-      (current + weeks) * _weekExtent,
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeOutCubic,
-    );
+    _animateTo((current + weeks) * _weekExtent);
   }
+
+  void _animateTo(double offset) => _scroll.animateTo(
+    offset,
+    duration: const Duration(milliseconds: 250),
+    curve: Curves.easeOutCubic,
+  );
 
   Widget _week(DayKey start) => SizedBox(
     height: _weekExtent,
@@ -85,23 +87,19 @@ class _DateListState extends ConsumerState<DateList> {
   /// 时让那一行贴着底边。已经整个露出来时不动。
   void _reveal(DayKey day) {
     if (!_scroll.hasClients) return;
-    final weekTop = _daysBetween(_anchor, _weekStart(day)) ~/ 7 * _weekExtent;
+    final weekStart = _weekStart(day);
+    final weekTop = _daysBetween(_anchor, weekStart) ~/ 7 * _weekExtent;
     final rowTop =
-        weekTop +
-        _headerHeight +
-        _daysBetween(_weekStart(day), day) * _rowHeight;
+        weekTop + _headerHeight + _daysBetween(weekStart, day) * _rowHeight;
     final rowBottom = rowTop + _rowHeight;
     final position = _scroll.position;
     final top = position.pixels;
     final bottom = top + position.viewportDimension;
     if (rowTop >= top && rowBottom <= bottom) return;
-    final target = rowBottom - weekTop > position.viewportDimension
-        ? rowBottom - position.viewportDimension
-        : weekTop;
-    _scroll.animateTo(
-      target,
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeOutCubic,
+    _animateTo(
+      rowBottom - weekTop > position.viewportDimension
+          ? rowBottom - position.viewportDimension
+          : weekTop,
     );
   }
 

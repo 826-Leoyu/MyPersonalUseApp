@@ -84,6 +84,7 @@ void main() {
     await harness.settle(tester);
   }
 
+  /// 按住 Ctrl 再按 [key]。
   Future<void> pressWithCtrl(
     WidgetTester tester,
     LogicalKeyboardKey key,
