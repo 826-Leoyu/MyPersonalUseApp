@@ -795,11 +795,8 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
       Rect.fromLTWH(r.x, r.y, r.width, r.height),
   ].fold<Rect?>(null, (all, r) => all?.expandToInclude(r) ?? r);
 
-  /// 卡片露出来时离可视区域边缘的距离。
-  static const _revealMargin = 24.0;
-
   /// 卡片已经完整地在可视区域里时什么都不做；不然最少地平移画布，让它完整
-  /// 出现（留出 [_revealMargin]）。不改变缩放比例。
+  /// 出现（留出 [revealMargin]）。不改变缩放比例。
   void _revealCard(String cardId) {
     final card = _boardCard(cardId);
     final viewport = _viewportKey.currentContext?.size;
@@ -820,10 +817,10 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
   /// 时为 0；放不下时让开头对齐。
   static double _revealShift(double start, double end, double extent) {
     if (start >= 0 && end <= extent) return 0;
-    if (start < 0 || end - start + 2 * _revealMargin > extent) {
-      return _revealMargin - start;
+    if (start < 0 || end - start + 2 * revealMargin > extent) {
+      return revealMargin - start;
     }
-    return extent - _revealMargin - end;
+    return extent - revealMargin - end;
   }
 
   @override
@@ -1133,7 +1130,10 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     final page = widget.shell(
       // 按住卡片时不从边缘拉出抽屉。
       dragging: _dragPointerId != null,
-      onShowAllCards: _contentBounds() == null ? null : _showAllCards,
+      onShowAllCards:
+          widget.board.cards.isEmpty && widget.board.carryOverRecords.isEmpty
+          ? null
+          : _showAllCards,
       body: Stack(
         children: [
           Positioned.fill(child: DotGrid(transform: _transform)),

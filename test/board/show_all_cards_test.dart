@@ -243,4 +243,33 @@ void main() {
     expect(tester.getRect(cardFinder(card)), before);
     await harness.dispose(tester);
   });
+
+  testWidgets('编辑时点「显示全部卡片」：还在编辑，输入的文字和焦点都还在', (tester) async {
+    useWindow(tester, 400);
+    final card = await seedCard(tester, x: 600, y: 60);
+    await harness.launch(tester);
+    await showAll(tester);
+    for (var i = 0; i < 2; i++) {
+      await tester.tap(find.text(card.title));
+      await tester.pump(kDoubleTapTimeout);
+      await harness.settle(tester);
+    }
+    await tester.enterText(find.widgetWithText(TextField, card.title), '买面包');
+    await resizeTo(tester, 300);
+
+    await showAll(tester);
+
+    final editor = find.widgetWithText(TextField, '买面包');
+    expect(editor, findsOneWidget);
+    expect(
+      tester
+          .widget<EditableText>(
+            find.descendant(of: editor, matching: find.byType(EditableText)),
+          )
+          .focusNode
+          .hasFocus,
+      isTrue,
+    );
+    await harness.dispose(tester);
+  });
 }
