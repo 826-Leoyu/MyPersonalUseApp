@@ -37,8 +37,12 @@ class BoardPage extends ConsumerStatefulWidget {
 }
 
 class _BoardPageState extends ConsumerState<BoardPage> {
-  /// 画布的平移和缩放。换一天时画布重建，平移和缩放保持不变。
-  final _transform = TransformationController();
+  /// 每一天画布的平移和缩放。换一天时画布重建，换回来时恢复离开时的样子；
+  /// 这次运行里还没看过的那天从初始视图开始。只在这次运行内记住，不存储。
+  final _transforms = <DayKey, TransformationController>{};
+
+  TransformationController _transformOf(DayKey day) =>
+      _transforms.putIfAbsent(day, TransformationController.new);
 
   /// 宽屏时日期侧栏展开着没有。只在这次运行内记住。
   bool _sidebarOpen = true;
@@ -49,7 +53,9 @@ class _BoardPageState extends ConsumerState<BoardPage> {
 
   @override
   void dispose() {
-    _transform.dispose();
+    for (final transform in _transforms.values) {
+      transform.dispose();
+    }
     super.dispose();
   }
 
@@ -145,19 +151,21 @@ class _BoardPageState extends ConsumerState<BoardPage> {
         board: value,
         // 过去的日期不能新建卡片。
         canCreateCards: day >= today,
-        transform: _transform,
+        transform: _transformOf(day),
       ),
       _ => shell(body: const SizedBox.expand()),
     };
   }
 
   /// 折叠、展开日期侧栏。画布反向平移侧栏让出、占用的宽度，卡片在屏幕上
-  /// 的位置不动。
+  /// 的位置不动。记住的其他日期也一起平移，换回去时卡片也还在原处。
   void _toggleSidebar() {
     final shift = _sidebarOpen ? dateSidebarWidth : -dateSidebarWidth;
     setState(() => _sidebarOpen = !_sidebarOpen);
-    _transform.value = Matrix4.translationValues(shift, 0, 0)
-      ..multiply(_transform.value);
+    for (final transform in _transforms.values) {
+      transform.value = Matrix4.translationValues(shift, 0, 0)
+        ..multiply(transform.value);
+    }
   }
 
   /// 在日期抽屉（已经关好）或日期侧栏里选了某一天。选的就是正在显示的那一天时

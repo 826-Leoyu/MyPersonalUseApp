@@ -478,12 +478,18 @@ void main() {
       return tester.getTopLeft(probe) - before;
     }
 
-    testWidgets('卡片跳过去以后已经在可视区域里：平移保持原样', (tester) async {
+    /// 从今天切到昨天，等昨天的画布显示出来。
+    Future<void> showYesterday(WidgetTester tester) async {
+      await harness.showDay(tester, yesterday);
+      await harness.settle(tester);
+    }
+
+    testWidgets('跳到这次还没看过的那天：用初始视图，不沿用当前这一天的平移', (tester) async {
       final card = await seedCard(tester);
       final record = (await carryOverToNextDay(tester)).single;
       harness.displayedDay = yesterday;
       await harness.launch(tester);
-      final moved = await pan(
+      await pan(
         tester,
         viewport(tester).bottomRight - const Offset(100, 100),
         const Offset(40, 30),
@@ -492,29 +498,58 @@ void main() {
 
       await tapRecord(tester, record);
 
-      // 顺延过来的卡片在今天画布的 (24, 24)。
+      // 顺延过来的卡片在今天画布的 (24, 24)，初始视图里已经完整可见。
       expect(
         tester.getTopLeft(cardFinder(card)),
-        viewport(tester).topLeft + const Offset(24, 24) + moved,
+        viewport(tester).topLeft + const Offset(24, 24),
       );
 
       await harness.dispose(tester);
     });
 
-    testWidgets('缩放过的画布：跳过去以后缩放比例不变', (tester) async {
+    testWidgets('跳到看过的那天、卡片在那天的视图里可见：恢复那天离开时的平移，画布不动', (tester) async {
       final card = await seedCard(tester);
       final record = (await carryOverToNextDay(tester)).single;
-      harness.displayedDay = yesterday;
+      await harness.launch(tester);
+      final todayMoved = await pan(
+        tester,
+        viewport(tester).bottomRight - const Offset(100, 100),
+        const Offset(40, 30),
+        cardFinder(card),
+      );
+      await showYesterday(tester);
+      await pan(
+        tester,
+        viewport(tester).bottomRight - const Offset(100, 100),
+        const Offset(-70, 10),
+        recordFinder(record),
+      );
+
+      await tapRecord(tester, record);
+
+      expect(
+        tester.getTopLeft(cardFinder(card)),
+        viewport(tester).topLeft + const Offset(24, 24) + todayMoved,
+      );
+
+      await harness.dispose(tester);
+    });
+
+    testWidgets('跳到看过、缩放过的那天：用那天自己的缩放比例，不沿用当前这一天的', (tester) async {
+      final card = await seedCard(tester);
+      final record = (await carryOverToNextDay(tester)).single;
       await harness.launch(tester);
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
       final mouse = TestPointer(1, PointerDeviceKind.mouse);
       await tester.sendEventToBinding(
-        mouse.hover(tester.getCenter(recordFinder(record))),
+        mouse.hover(tester.getCenter(cardFinder(card))),
       );
       await tester.sendEventToBinding(mouse.scroll(const Offset(0, 2000)));
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await harness.settle(tester);
-      expect(tester.getRect(recordFinder(record)).width, 90);
+      expect(tester.getRect(cardFinder(card)).width, 90);
+      await showYesterday(tester);
+      expect(tester.getRect(recordFinder(record)).width, 180);
 
       await tapRecord(tester, record);
 
@@ -525,33 +560,35 @@ void main() {
       await harness.dispose(tester);
     });
 
-    testWidgets('卡片跳过去以后在可视区域外：最少地平移画布，让卡片完整出现，缩放不变', (tester) async {
+    testWidgets('跳到看过的那天、卡片在那天的视图外：在那天的视图上最少地平移，让卡片完整出现，缩放不变', (tester) async {
       final card = await seedCard(tester, x: 900, y: 500);
       final record = (await carryOverToNextDay(tester)).single;
-      harness.displayedDay = yesterday;
       await harness.launch(tester);
-      // 往左上平移，让历史记录露出来；今天画布左上角的卡片就到可视区域外了。
+      // 今天往右平移，(24, 24) 的卡片就有一部分到可视区域右边外面了。
+      final view = viewport(tester);
+      await pan(tester, view.center, const Offset(700, 0), cardFinder(card));
+      expect(
+        view.intersect(tester.getRect(cardFinder(card))),
+        isNot(tester.getRect(cardFinder(card))),
+      );
+      await showYesterday(tester);
+      // 昨天往左上平移，让历史记录露出来。
       await pan(
         tester,
         viewport(tester).center,
         const Offset(-400, -300),
         recordFinder(record),
       );
-      expect(
-        viewport(tester).contains(tester.getCenter(recordFinder(record))),
-        isTrue,
-      );
+      expect(view.contains(tester.getCenter(recordFinder(record))), isTrue);
 
       await tapRecord(tester, record);
 
       final shown = tester.getRect(cardFinder(card));
       expect(shown.size, const Size(180, 88));
-      final view = viewport(tester);
       expect(view.intersect(shown), shown);
-      // 只平移到刚好露出来（留一点边距），不是把画布整个复位。
-      expect(shown.left - view.left, lessThanOrEqualTo(48));
-      expect(shown.top - view.top, lessThanOrEqualTo(48));
-      expect(shown.left - view.left, greaterThan(0));
+      // 在今天的视图上只往左平移到刚好露出右边（留出 24 的边距），不改上下，
+      // 不是把画布整个复位，也不是用昨天的视图。
+      expect(shown.topLeft - view.topLeft, Offset(view.width - 24 - 180, 24));
 
       await harness.dispose(tester);
     });
