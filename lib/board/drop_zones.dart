@@ -79,18 +79,19 @@ class _Zone extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = PlannerColors.of(context);
     final (icon, label, color, textColor) = switch (zone) {
       DropZone.complete => (
         Icons.check_circle,
         '完成',
-        PlannerTheme.completeZone,
-        PlannerTheme.completeZoneText,
+        colors.completeZone,
+        colors.completeZoneText,
       ),
       DropZone.trash => (
         Icons.delete,
         '回收站',
-        PlannerTheme.trashZone,
-        PlannerTheme.trashZoneText,
+        colors.trashZone,
+        colors.trashZoneText,
       ),
     };
     return AnimatedContainer(
@@ -105,11 +106,11 @@ class _Zone extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         spacing: PlannerTheme.space2,
         children: [
-          Icon(icon, color: active ? PlannerTheme.onZone : color),
+          Icon(icon, color: active ? colors.onZone : color),
           Text(
             label,
             style: TextStyle(
-              color: active ? PlannerTheme.onZone : textColor,
+              color: active ? colors.onZone : textColor,
               fontWeight: FontWeight.w600,
             ),
           ),

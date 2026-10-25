@@ -17,7 +17,7 @@ class DotGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) => IgnorePointer(
     child: CustomPaint(
-      painter: _DotGridPainter(transform),
+      painter: _DotGridPainter(transform, PlannerColors.of(context).gridDot),
       size: Size.infinite,
     ),
   );
@@ -40,16 +40,17 @@ Iterable<Offset> dotGridPositions(Size size, Matrix4 transform) sync* {
 }
 
 class _DotGridPainter extends CustomPainter {
-  _DotGridPainter(this.transform) : super(repaint: transform);
+  _DotGridPainter(this.transform, this.color) : super(repaint: transform);
 
   final TransformationController transform;
+  final Color color;
 
   @override
   void paint(Canvas canvas, Size size) {
     // 缩小时一屏有上万个点，一次 drawPoints 画完，不逐个 drawCircle；圆头的
     // 线宽就是点的直径。
     final paint = Paint()
-      ..color = PlannerTheme.dot
+      ..color = color
       ..strokeWidth = 2 * PlannerTheme.dotRadius
       ..strokeCap = StrokeCap.round;
     canvas.drawPoints(
@@ -61,5 +62,5 @@ class _DotGridPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_DotGridPainter oldDelegate) =>
-      oldDelegate.transform != transform;
+      oldDelegate.transform != transform || oldDelegate.color != color;
 }
