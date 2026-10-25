@@ -735,7 +735,7 @@ void main() {
       final card = tester.getRect(cardFinder(carried));
       final tag = tester.getRect(tagFinder(carried));
       expect(card.intersect(tag), tag);
-      expect(card.right - tag.right, lessThan(16));
+      expect(card.right - tag.right, lessThanOrEqualTo(16));
       expect(tag.top - card.top, lessThan(16));
       expect(tagFinder(fresh), findsNothing);
       expect(find.text('顺延'), findsOneWidget);

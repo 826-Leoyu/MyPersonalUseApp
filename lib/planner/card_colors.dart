@@ -10,14 +10,16 @@ abstract final class CardColors {
   /// 深色背景上的文字：白色。
   static const lightText = 0xFFFFFFFF;
 
-  /// 色板里的 8 种预设颜色，第一种是新卡片的默认颜色。色值是暂定的。
+  /// 色板里的 8 种预设颜色，第一种是新卡片的默认颜色。按 `docs/ui/` 参考图的
+  /// 柔和程度定（v4）；改了色值的预设不迁移已保存的卡片，那些卡片保持原来的
+  /// 颜色，只是在色板里不显示成选中。
   static const presets = <({String name, int argb})>[
     (name: '淡黄', argb: TaskCard.defaultColorArgb),
-    (name: '淡橙', argb: 0xFFFFD8A8),
-    (name: '淡粉', argb: 0xFFFFCCD9),
-    (name: '淡紫', argb: 0xFFE2D5F8),
-    (name: '淡蓝', argb: 0xFFCCE4FF),
-    (name: '淡绿', argb: 0xFFD3F0C8),
+    (name: '淡橙', argb: 0xFFFFE0BF),
+    (name: '淡粉', argb: 0xFFFFDCE5),
+    (name: '淡紫', argb: 0xFFE8DFFA),
+    (name: '淡蓝', argb: 0xFFDBEBFF),
+    (name: '淡绿', argb: 0xFFDDF2D4),
     (name: '淡灰', argb: 0xFFE5E5EA),
     (name: '白', argb: 0xFFFFFFFF),
   ];
