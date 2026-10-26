@@ -11,7 +11,7 @@ class PlannerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'MyPersonalUseApp',
+      title: 'Dailynote',
       debugShowCheckedModeBanner: false,
       theme: PlannerTheme.light(),
       darkTheme: PlannerTheme.dark(),
