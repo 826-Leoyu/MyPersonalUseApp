@@ -7,6 +7,7 @@ import 'dart:ui';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/providers.dart';
+import '../planner/card_time.dart';
 import '../planner/day_key.dart';
 import '../planner/link.dart';
 import '../planner/planner_exceptions.dart';
@@ -37,23 +38,41 @@ final class LinkSelected extends BoardSelection {
   final String linkId;
 }
 
-/// 正在编辑卡片的标题和备注。退出编辑时保存。
+/// 正在编辑卡片的标题、备注和两个时间。退出编辑时保存。
 ///
-/// [title] 和 [note] 是编辑框里的当前内容，由编辑框随输入更新，
-/// 不通知界面刷新。
+/// 这些字段是编辑框里的当前内容，由编辑框随输入更新，不通知界面刷新。
 sealed class Editing extends BoardSelection {
-  Editing({required this.title, required this.note});
+  Editing({
+    required this.title,
+    required this.note,
+    this.eventTime,
+    this.dueTime,
+  });
 
   String title;
   String note;
+  CardTime? eventTime;
+  CardTime? dueTime;
 }
 
 /// 正在编辑一张已有的卡片。退出编辑时标题为空就不保存，保留原来的内容。
 final class EditingCard extends Editing {
-  EditingCard(TaskCard card) : this._(card.id, card.title, card.note ?? '');
+  EditingCard(TaskCard card)
+    : this._(
+        card.id,
+        card.title,
+        card.note ?? '',
+        eventTime: card.eventTime,
+        dueTime: card.dueTime,
+      );
 
-  EditingCard._(this.cardId, String title, String note)
-    : super(title: title, note: note);
+  EditingCard._(
+    this.cardId,
+    String title,
+    String note, {
+    super.eventTime,
+    super.dueTime,
+  }) : super(title: title, note: note);
 
   final String cardId;
 }
@@ -448,10 +467,16 @@ class BoardSelectionController extends Notifier<BoardSelection> {
       };
     }
     final note = editing.note.trim().isEmpty ? null : editing.note;
+    final times = (event: editing.eventTime, due: editing.dueTime);
     final service = await ref.read(plannerServiceProvider.future);
     switch (editing) {
       case EditingCard(:final cardId):
-        await service.updateCardContent(cardId, title: title, note: note);
+        await service.updateCardContent(
+          cardId,
+          title: title,
+          note: note,
+          times: times,
+        );
         return cardId;
       case EditingNewCard(:final x, :final y):
         final card = await service.createCard(
@@ -460,11 +485,22 @@ class BoardSelectionController extends Notifier<BoardSelection> {
           y: y,
           title: title,
         );
-        if (note == null) return card.id;
-        // 卡片已经建好，接下来只是补上备注。补备注失败时停在编辑这张卡片的
-        // 状态，再次保存只会更新它，不会再新建一张。
-        state = EditingCard._(card.id, editing.title, editing.note);
-        await service.updateCardContent(card.id, title: title, note: note);
+        if (note == null && times == (event: null, due: null)) return card.id;
+        // 卡片已经建好，接下来只是补上备注和时间。补的时候失败了停在编辑
+        // 这张卡片的状态，再次保存只会更新它，不会再新建一张。
+        state = EditingCard._(
+          card.id,
+          editing.title,
+          editing.note,
+          eventTime: editing.eventTime,
+          dueTime: editing.dueTime,
+        );
+        await service.updateCardContent(
+          card.id,
+          title: title,
+          note: note,
+          times: times,
+        );
         return card.id;
     }
   }

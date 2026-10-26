@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import '../planner/card_time.dart';
 import '../planner/link_kind.dart';
 import '../planner/task_card.dart';
 
@@ -7,6 +8,9 @@ part 'planner_database.g.dart';
 
 // 所有 ID 都是 UUID v4 文本；所有时间都是 UTC 毫秒整数；
 // dayKey 是本地时区的 `YYYY-MM-DD` 文本。
+//
+// 例外：卡片的活动时间和截止时间（schemaVersion 2 新增）是文本，精度为
+// dateTime 时存 UTC 的 ISO 8601 时间，精度为 date 时存本地的 dayKey。
 
 @DataClassName('TaskCardRow')
 @TableIndex(name: 'task_cards_day_key', columns: {#dayKey})
@@ -28,6 +32,17 @@ class TaskCards extends Table {
   IntColumn get deletedAt => integer().nullable()();
   IntColumn get createdAt => integer()();
   IntColumn get updatedAt => integer()();
+
+  // ---- schemaVersion 2 ----
+  TextColumn get eventTime => text().nullable()();
+  TextColumn get eventTimePrecision =>
+      textEnum<CardTimePrecision>().nullable()();
+  BoolColumn get eventTimePending =>
+      boolean().withDefault(const Constant(false))();
+  TextColumn get dueTime => text().nullable()();
+  TextColumn get dueTimePrecision => textEnum<CardTimePrecision>().nullable()();
+  BoolColumn get dueTimePending =>
+      boolean().withDefault(const Constant(false))();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -91,7 +106,7 @@ class PlannerDatabase extends _$PlannerDatabase {
   PlannerDatabase(super.executor);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -99,6 +114,24 @@ class PlannerDatabase extends _$PlannerDatabase {
       await m.createAll();
       await into(appMeta).insert(
         AppMetaCompanion.insert(key: 'schemaVersion', value: '$schemaVersion'),
+      );
+    },
+    onUpgrade: (m, from, to) async {
+      // 只新增可为空或有默认值的列，旧数据不受影响。
+      if (from < 2) {
+        for (final column in [
+          taskCards.eventTime,
+          taskCards.eventTimePrecision,
+          taskCards.eventTimePending,
+          taskCards.dueTime,
+          taskCards.dueTimePrecision,
+          taskCards.dueTimePending,
+        ]) {
+          await m.addColumn(taskCards, column);
+        }
+      }
+      await into(appMeta).insertOnConflictUpdate(
+        AppMetaCompanion.insert(key: 'schemaVersion', value: '$to'),
       );
     },
     beforeOpen: (details) async {

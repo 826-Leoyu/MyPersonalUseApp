@@ -270,7 +270,7 @@ v2 的改动没有改变分层：历史记录是数据层多一张表、业务�
 | `watchDayCounts` | 日期范围 | 每天的未完成数和已完成数 | 给日期抽屉用；不包含历史记录 |
 | `findCard`（v2） | id | 卡片当前的日期、状态、是否在回收站 | 给点击历史记录跳转用；找不到 → `NotFound` |
 | `createCard` | dayKey、位置、标题、颜色（可选） | 新卡片 | 标题为空 → `InvalidInput`；dayKey 早于今天 → `InvalidState`（v3 已确认：过去的日期不能新建卡片） |
-| `updateCardContent` | id、标题、备注 | | 标题为空 → `InvalidInput` |
+| `updateCardContent` | id、标题、备注；活动时间和截止时间（可选，不给时不变；spec 0002 新增） | | 标题为空 → `InvalidInput` |
 | `moveCard` | id、新位置 | | 同时把 zIndex 提到最上层 |
 | `resizeCard` | id、新尺寸 | | 超出上下限时截断，不报错 |
 | `setCardColor` | id、ARGB 颜色值 | | |
