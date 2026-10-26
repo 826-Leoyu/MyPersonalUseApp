@@ -27,13 +27,16 @@ import 'date_drawer.dart';
 import 'dot_grid.dart';
 import 'drop_zones.dart';
 import 'link_layer.dart';
+import 'show_all.dart';
 import 'undo_delete_notice.dart';
 
 /// 用画布 [body] 搭出页面的外框。[dragging] 时按住了卡片，不从边缘拉出抽屉。
+/// [onShowAllCards] 是页头的「显示全部卡片」，为 null 时按钮不能点。
 typedef BoardShellBuilder = Widget Function({
   required Widget body,
   Widget? floatingActionButton,
   required bool dragging,
+  VoidCallback? onShowAllCards,
 });
 
 /// 一天的画布：卡片按坐标绝对定位显示。
@@ -245,6 +248,11 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
             _showToday,
         // 编辑时交给编辑框撤销输入的文字。
         const SingleActivator(LogicalKeyboardKey.keyZ, control: true): _undo,
+        const SingleActivator(
+          LogicalKeyboardKey.digit0,
+          control: true,
+          includeRepeats: false,
+        ): _showAllCards,
       },
       // 编辑时保存并退出编辑，不在编辑时取消选中。
       const SingleActivator(
@@ -766,11 +774,29 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     }
   }
 
-  /// 卡片露出来时离可视区域边缘的距离。
-  static const _revealMargin = 24.0;
+  /// 「显示全部卡片」：平移、缩放画布，让这一天的卡片和历史记录都在可视
+  /// 区域里。只改视图，不改卡片，不写数据库。
+  void _showAllCards() {
+    final viewport = _viewportKey.currentContext?.size;
+    final content = _contentBounds();
+    if (viewport == null || content == null) return;
+    _transform.value = showAllTransform(
+      content: content,
+      viewport: viewport,
+      minScale: BoardCanvas.minScale,
+    );
+  }
+
+  /// 这一天所有卡片和历史记录在画布坐标上合起来的范围；什么都没有时为 null。
+  Rect? _contentBounds() => [
+    for (final c in widget.board.cards)
+      Rect.fromLTWH(c.x, c.y, c.width, c.height),
+    for (final r in widget.board.carryOverRecords)
+      Rect.fromLTWH(r.x, r.y, r.width, r.height),
+  ].fold<Rect?>(null, (all, r) => all?.expandToInclude(r) ?? r);
 
   /// 卡片已经完整地在可视区域里时什么都不做；不然最少地平移画布，让它完整
-  /// 出现（留出 [_revealMargin]）。不改变缩放比例。
+  /// 出现（留出 [revealMargin]）。不改变缩放比例。
   void _revealCard(String cardId) {
     final card = _boardCard(cardId);
     final viewport = _viewportKey.currentContext?.size;
@@ -791,10 +817,10 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
   /// 时为 0；放不下时让开头对齐。
   static double _revealShift(double start, double end, double extent) {
     if (start >= 0 && end <= extent) return 0;
-    if (start < 0 || end - start + 2 * _revealMargin > extent) {
-      return _revealMargin - start;
+    if (start < 0 || end - start + 2 * revealMargin > extent) {
+      return revealMargin - start;
     }
-    return extent - _revealMargin - end;
+    return extent - revealMargin - end;
   }
 
   @override
@@ -1104,6 +1130,10 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     final page = widget.shell(
       // 按住卡片时不从边缘拉出抽屉。
       dragging: _dragPointerId != null,
+      onShowAllCards:
+          widget.board.cards.isEmpty && widget.board.carryOverRecords.isEmpty
+          ? null
+          : _showAllCards,
       body: Stack(
         children: [
           Positioned.fill(child: DotGrid(transform: _transform)),

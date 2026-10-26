@@ -26,6 +26,9 @@ class BoardPage extends ConsumerStatefulWidget {
   /// 宽屏时标题栏左上角折叠、展开日期侧栏的按钮的 key。
   static const sidebarButtonKey = ValueKey('date-sidebar-button');
 
+  /// 标题栏上「显示全部卡片」按钮的 key。
+  static const showAllCardsButtonKey = ValueKey('show-all-cards-button');
+
   /// 标题栏上打开「已完成」列表的按钮的 key。
   static const completedButtonKey = ValueKey('completed-button');
 
@@ -77,7 +80,7 @@ class _BoardPageState extends ConsumerState<BoardPage> {
         onRetry: () => ref.invalidate(plannerServiceProvider),
       );
     }
-    final appBar = AppBar(
+    PreferredSizeWidget appBar({VoidCallback? onShowAllCards}) => AppBar(
       // 窄屏时打开日期抽屉，要用画布的 Scaffold 打开，所以放在 Builder 里；
       // 宽屏时折叠、展开日期侧栏。
       leading: wide
@@ -104,6 +107,12 @@ class _BoardPageState extends ConsumerState<BoardPage> {
         ),
       ),
       actions: [
+        IconButton(
+          key: BoardPage.showAllCardsButtonKey,
+          tooltip: '显示全部卡片',
+          onPressed: onShowAllCards,
+          icon: const Icon(Icons.fit_screen_outlined),
+        ),
         Tooltip(
           message: '已完成',
           child: TextButton.icon(
@@ -129,9 +138,10 @@ class _BoardPageState extends ConsumerState<BoardPage> {
       required Widget body,
       Widget? floatingActionButton,
       bool dragging = false,
+      VoidCallback? onShowAllCards,
     }) => BoardShell(
       wide: wide,
-      appBar: appBar,
+      appBar: appBar(onShowAllCards: onShowAllCards),
       drawer: DateDrawer(onSelect: _selectDay),
       sidebar: _sidebarOpen
           ? DateSidebar(key: _sidebarKey, onSelect: _selectDay)
