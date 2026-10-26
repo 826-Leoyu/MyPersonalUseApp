@@ -11,6 +11,7 @@ part 'planner_database.g.dart';
 //
 // 例外：卡片的活动时间和截止时间（schemaVersion 2 新增）是文本，精度为
 // dateTime 时存 UTC 的 ISO 8601 时间，精度为 date 时存本地的 dayKey。
+// 原因见 docs/adr/0001-card-times-stored-as-text.md。
 
 @DataClassName('TaskCardRow')
 @TableIndex(name: 'task_cards_day_key', columns: {#dayKey})
