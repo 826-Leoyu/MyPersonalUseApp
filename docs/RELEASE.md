@@ -6,10 +6,10 @@
 
 ```powershell
 flutter build windows --release
-Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath build\dailycanvas-windows-<版本号>.zip -Force
+Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath build\dailynote-windows-<版本号>.zip -Force
 ```
 
-zip 里是整个 `Release` 目录的内容（exe、dll、`data\`），解压到任何地方都能直接运行 exe。
+zip 里是整个 `Release` 目录的内容（exe、dll、`data\`），解压到任何地方都能直接运行 `Dailynote.exe`。
 
 ## Android
 
