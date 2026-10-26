@@ -14,6 +14,8 @@ val keystoreProperties = Properties().apply {
         keystorePropertiesFile.inputStream().use { load(it) }
     }
 }
+val keystoreKeys = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+val missingKeystoreKeys = keystoreKeys.filter { keystoreProperties.getProperty(it).isNullOrBlank() }
 
 android {
     namespace = "io.github.leoyu.dailycanvas"
@@ -41,7 +43,7 @@ android {
 
     signingConfigs {
         create("release") {
-            if (keystorePropertiesFile.exists()) {
+            if (missingKeystoreKeys.isEmpty()) {
                 keyAlias = keystoreProperties.getProperty("keyAlias")
                 keyPassword = keystoreProperties.getProperty("keyPassword")
                 storeFile = file(keystoreProperties.getProperty("storeFile"))
@@ -57,11 +59,14 @@ android {
     }
 }
 
-// 没有 key.properties 时 release 构建直接失败，不退回 debug 签名，免得把 debug 签名的包当成 release 装到手机上。
-// 只在真的要跑 release 任务时检查，debug 构建不受影响。
+// 签名信息不全时 release 构建直接失败，不退回 debug 签名，免得把 debug 签名的包当成 release 装到手机上。
+// 只在真的要跑 release 构建类型的任务（assembleRelease 等）时检查，debug 构建不受影响。
 gradle.taskGraph.whenReady {
-    if (!keystorePropertiesFile.exists() && allTasks.any { it.name.contains("Release") }) {
-        throw GradleException("缺少 android/key.properties，无法签名 release 版本。见 docs/RELEASE.md。")
+    val buildsRelease = allTasks.any { it.name.contains("Release") }
+    if (buildsRelease && missingKeystoreKeys.isNotEmpty()) {
+        throw GradleException(
+            "android/key.properties 缺少 ${missingKeystoreKeys.joinToString()}，无法签名 release 版本。见 docs/RELEASE.md。"
+        )
     }
 }
 

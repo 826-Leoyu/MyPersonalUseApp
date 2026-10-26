@@ -12,7 +12,7 @@ void main() {
     expect(manifest, isNot(contains('android.permission.INTERNET')));
   });
 
-  test('lib 里没有网络请求', () {
+  test('lib 里没有网络代码', () {
     final network = RegExp(
       r'''\b(HttpClient|HttpServer|WebSocket|Socket|RawSocket|SecureSocket)\b'''
       r'''|package:(http|dio|web_socket_channel)/''',
