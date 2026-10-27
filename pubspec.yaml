@@ -45,6 +45,7 @@ dependencies:
   flex_color_picker: ^3.8.0
   crypto: ^3.0.8
   file_selector: ^1.1.0
+  html: ^0.15.7
 
 dev_dependencies:
   flutter_test:

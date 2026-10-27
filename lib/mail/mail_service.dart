@@ -1,5 +1,6 @@
-import 'dart:math';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:clock/clock.dart';
 import 'package:crypto/crypto.dart';
@@ -190,8 +191,12 @@ class MailService {
               receivedAt: Value(mail.receivedAt?.millisecondsSinceEpoch),
               importance: Value(mail.importance),
               hasAttachments: Value(mail.hasAttachments),
-              // HTML 转文本以后再做（#84），这一步先原样保存。
-              bodyText: Value(mail.body.isEmpty ? null : mail.body),
+              hasInlineImages: Value(mail.hasInlineImages),
+              bodyText: Value(mail.body.text),
+              bodyPossiblyIncomplete: Value(mail.body.possiblyIncomplete),
+              links: Value(
+                mail.body.links.isEmpty ? null : jsonEncode(mail.body.links),
+              ),
               analysisStatus: MailAnalysisStatus.pending,
               sourceFileId: fileId,
               importedAt: now,
@@ -237,22 +242,37 @@ class MailService {
         ),
         (m) => OrderingTerm.asc(m.id),
       ]);
-    return query.watch().map(
-      (rows) => [
-        for (final row in rows)
-          MailPreview(
-            id: row.id,
-            subject: row.subject,
-            senderName: row.senderName,
-            senderAddress: row.senderAddress,
-            receivedAt: switch (row.receivedAt) {
-              final at? => DateTime.fromMillisecondsSinceEpoch(at, isUtc: true),
-              null => null,
-            },
-          ),
-      ],
-    );
+    return query.watch().map((rows) => [for (final row in rows) _preview(row)]);
   }
+
+  /// 一封邮件的正文和链接；没有这封邮件时为 null。
+  Future<MailDetail?> mailDetail(String id) => _read(() async {
+    final row = await (_db.select(
+      _db.mails,
+    )..where((m) => m.id.equals(id))).getSingleOrNull();
+    if (row == null) return null;
+    return MailDetail(
+      preview: _preview(row),
+      bodyText: row.bodyText,
+      links: switch (row.links) {
+        final json? => (jsonDecode(json) as List<Object?>).cast<String>(),
+        null => const [],
+      },
+      hasInlineImages: row.hasInlineImages,
+      bodyPossiblyIncomplete: row.bodyPossiblyIncomplete,
+    );
+  });
+
+  MailPreview _preview(MailRow row) => MailPreview(
+    id: row.id,
+    subject: row.subject,
+    senderName: row.senderName,
+    senderAddress: row.senderAddress,
+    receivedAt: switch (row.receivedAt) {
+      final at? => DateTime.fromMillisecondsSinceEpoch(at, isUtc: true),
+      null => null,
+    },
+  );
 
   /// 设置里的邮箱地址，没有填写时为 null。
   Future<String?> mailboxAddress() => _read(_mailboxAddress);

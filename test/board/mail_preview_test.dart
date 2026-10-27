@@ -90,6 +90,51 @@ void main() {
     await harness.dispose(tester);
   });
 
+  windowsTest('点开一封邮件，看到转换后的正文和编号的链接', (tester) async {
+    await openMailPreview(tester);
+    pick(
+      'mail-1.json',
+      fakeEnvelope([
+        fakeMessage(
+          subject: '秋季招聘会',
+          body:
+              '<p>请在周五前<a href="https://example.com/signup">报名</a>。</p>'
+              '<blockquote>招聘会在哪里？</blockquote>'
+              '<img src="cid:poster@01DB" alt="海报">',
+        ),
+        fakeMessage(
+          internetMessageId: '<b@example.com>',
+          subject: '图书馆通知',
+          body: '',
+          bodyPreview: '图书馆周六闭馆',
+        ),
+      ]),
+    );
+    await tapImport(tester);
+    await waitForText(tester, '已导入 mail-1.json：新邮件 2 封');
+    await harness.settle(tester);
+
+    await tester.tap(find.text('秋季招聘会'));
+    await harness.settle(tester);
+
+    expect(
+      find.text('请在周五前报名 [1]。\n\n[引用]\n招聘会在哪里？\n[/引用]\n\n[图片: 海报]'),
+      findsOneWidget,
+    );
+    expect(find.text('[1] https://example.com/signup'), findsOneWidget);
+    expect(find.text('有内嵌图片'), findsOneWidget);
+    expect(find.text('正文可能不完整'), findsNothing);
+
+    await tester.pageBack();
+    await harness.settle(tester);
+    await tester.tap(find.text('图书馆通知'));
+    await harness.settle(tester);
+
+    expect(find.text('图书馆周六闭馆'), findsOneWidget);
+    expect(find.text('正文可能不完整'), findsOneWidget);
+    await harness.dispose(tester);
+  });
+
   windowsTest('格式错误的文件提示文件名，列表不变', (tester) async {
     await openMailPreview(tester);
     pick('mail-bad.json', 'not json'.codeUnits);

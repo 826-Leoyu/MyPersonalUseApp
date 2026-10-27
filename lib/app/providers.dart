@@ -130,6 +130,13 @@ final mailPreviewsProvider = StreamProvider.autoDispose<List<MailPreview>>(
   retry: (_, _) => null,
 );
 
+/// 一封邮件的正文和链接，给点开的邮件用；没有这封邮件时为 null。
+final mailDetailProvider = FutureProvider.autoDispose
+    .family<MailDetail?, String>((ref, id) async {
+      final service = await ref.watch(mailServiceProvider.future);
+      return service.mailDetail(id);
+    }, retry: (_, _) => null);
+
 /// 设置里的邮箱地址，没有填写时为 null。修改以后 invalidate 它。
 final mailboxAddressProvider = FutureProvider.autoDispose<String?>((ref) async {
   final service = await ref.watch(mailServiceProvider.future);
