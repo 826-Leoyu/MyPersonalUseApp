@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:my_personal_use_app/mail/mail_analyzer.dart';
 import 'package:my_personal_use_app/planner/card_time.dart';
 
@@ -7,6 +9,7 @@ class FakeAnalyzer implements MailAnalyzer {
   final requests = <AnalysisRequest>[];
   final _results = <String, AnalysisResult>{};
   final _failures = <String, AnalysisFailureType>{};
+  final _holds = <String, Completer<void>>{};
 
   /// 主题为 [subject] 的邮件返回 [result]。
   void returns(String subject, AnalysisResult result) {
@@ -18,12 +21,19 @@ class FakeAnalyzer implements MailAnalyzer {
   void fails(String subject, AnalysisFailureType type) =>
       _failures[subject] = type;
 
+  /// 主题为 [subject] 的邮件分析停在中途，直到 [release]。
+  void hold(String subject) => _holds[subject] = Completer<void>();
+
+  /// 让 [hold] 住的分析接着进行。
+  void release(String subject) => _holds.remove(subject)?.complete();
+
   /// 收到过的请求的主题，按顺序。
   List<String> get analyzedSubjects => [for (final r in requests) r.subject];
 
   @override
   Future<AnalysisResult> analyze(AnalysisRequest request) async {
     requests.add(request);
+    if (_holds[request.subject] case final held?) await held.future;
     if (_failures[request.subject] case final type?) {
       throw AnalysisFailed(type);
     }

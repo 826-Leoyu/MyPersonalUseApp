@@ -221,6 +221,37 @@ void main() {
       expect(await notices(), [const AnalysisPaused()]);
     });
 
+    test('分析进行中点 [重试]：失败的邮件在这一轮里接着分析，不计入上限', () async {
+      // 格式不对的 3 次计入上限，再加 limit - 3 封新邮件正好到上限，最后
+      // 一封留着。
+      h.analyzer.fails('Broken', AnalysisFailureType.invalidOutput);
+      await importAndAnalyze([mail('Broken', at: '2026-10-19T20:00:00Z')]);
+      await h.mail.analyzePending();
+      await h.mail.analyzePending();
+      h.analyzer.returns('Broken', informational);
+      h.analyzer.requests.clear();
+      h.analyzer.hold('M000');
+
+      await h.importJson('mail-${files++}.json', fakeEnvelope(many(limit - 2)));
+      final run = h.mail.analyzePending();
+      await pumpEventQueue();
+      expect(h.analyzer.analyzedSubjects, ['M000']);
+      final retried = h.mail.retryAnalysis();
+      await pumpEventQueue();
+      h.analyzer.release('M000');
+      await run;
+      await retried;
+
+      // Broken 收件时间最新，紧接着正在分析的 M000；它不计入上限，所以
+      // 分析了 limit - 3 封新邮件才到上限。
+      expect(h.analyzer.analyzedSubjects, [
+        'M000',
+        'Broken',
+        for (final m in many(limit - 3).skip(1)) m['subject'],
+      ]);
+      expect(await notices(), [const AnalysisPaused()]);
+    });
+
     test('上限按本地日算，重启以后还记得今天分析了多少', () async {
       await importAndAnalyze(many(limit - 1));
       await h.reopen();
