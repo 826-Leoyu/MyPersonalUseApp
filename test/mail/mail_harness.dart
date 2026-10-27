@@ -80,6 +80,13 @@ class MailHarness {
     return file.path;
   }
 
+  /// 扫描两次邮件文件夹，中间隔一分钟：第一次看到的文件第二次才会读取。
+  Future<void> scanTwice() async {
+    await mail.scanFolder();
+    now = now.add(const Duration(minutes: 1));
+    await mail.scanFolder();
+  }
+
   /// 写一个文件并导入。
   Future<ImportOutcome> importJson(String name, Object? content) =>
       mail.importFile(writeFile(name, content));

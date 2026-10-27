@@ -96,13 +96,18 @@ class CarryOverRecords extends Table {
 // ---- schemaVersion 3：邮件。字段的含义见 spec 0002 的"数据模型" ----
 
 /// 导出文件。同一个内容哈希只处理一次。
+///
+/// 扫描邮件文件夹时一个文件名一行；手动导入的文件一个内容哈希一行。
 @DataClassName('MailExportFileRow')
 class MailExportFiles extends Table {
   TextColumn get id => text()();
   TextColumn get fileName => text()();
   IntColumn get fileSize => integer().nullable()();
   IntColumn get fileModifiedAt => integer().nullable()();
-  TextColumn get contentHash => text().unique()();
+
+  /// 还没读过（`seen`）时为空（schemaVersion 4 起可为空，并且不再唯一：
+  /// OneDrive 生成的副本和原文件内容一样）。
+  TextColumn get contentHash => text().nullable()();
   TextColumn get status => textEnum<MailExportFileStatus>()();
   TextColumn get errorType => text().nullable()();
   TextColumn get mailbox => text().nullable()();
@@ -116,6 +121,11 @@ class MailExportFiles extends Table {
   IntColumn get skippedCount => integer().nullable()();
   IntColumn get firstSeenAt => integer()();
   IntColumn get importedAt => integer().nullable()();
+
+  // ---- schemaVersion 4 ----
+
+  /// 扫描时大小和修改时间从什么时候起没再变过。手动导入的文件为空。
+  IntColumn get unchangedSince => integer().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -231,7 +241,8 @@ class MailItemUpdates extends Table {
   Set<Column> get primaryKey => {id};
 }
 
-/// 键值表：`lastMaintenanceDay`、`schemaVersion`、`mailboxAddress`。
+/// 键值表：`lastMaintenanceDay`、`schemaVersion`、`mailboxAddress`、
+/// `mailFolder`、`mailFolderChosenAt`、`lastImportAt`、`lastImportNewMails`。
 @DataClassName('AppMetaEntry')
 class AppMeta extends Table {
   TextColumn get key => text()();
@@ -258,7 +269,7 @@ class PlannerDatabase extends _$PlannerDatabase {
   PlannerDatabase(super.executor);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -292,6 +303,14 @@ class PlannerDatabase extends _$PlannerDatabase {
           await m.createTable(table);
         }
         await m.createIndex(mailsReceivedAt);
+      } else if (from < 4) {
+        // 内容哈希去掉非空和唯一约束，要重建表；数据原样保留。
+        await m.alterTable(
+          TableMigration(
+            mailExportFiles,
+            newColumns: [mailExportFiles.unchangedSince],
+          ),
+        );
       }
       await into(appMeta).insertOnConflictUpdate(
         AppMetaCompanion.insert(key: 'schemaVersion', value: '$to'),
