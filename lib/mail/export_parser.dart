@@ -5,6 +5,7 @@ library;
 
 import 'dart:convert';
 
+import 'body_text.dart';
 import 'mail_states.dart';
 
 /// 信封格式的 `format` 字段。
@@ -73,8 +74,6 @@ class ExportedMail {
     required this.importance,
     required this.hasAttachments,
     required this.body,
-    required this.isHtml,
-    required this.bodyPreview,
   });
 
   /// 邮件键：`internetMessageId`，没有时用 `id`。
@@ -90,9 +89,9 @@ class ExportedMail {
   final DateTime? receivedAt;
   final String? importance;
   final bool hasAttachments;
-  final String body;
-  final bool isHtml;
-  final String? bodyPreview;
+
+  /// 转换后的正文，见 [convertMailBody]。
+  final MailBody body;
 }
 
 /// 邮箱地址的规范形式：去掉首尾空白，转成小写。
@@ -164,7 +163,7 @@ ExportedMail? _mail(Map<String, Object?> m) {
     ),
     _ => (null, null),
   };
-  final (body, isHtml) = switch (m['body']) {
+  final (content, isHtml) = switch (m['body']) {
     final String content => (content, m['isHtml'] == true),
     {'content': final String content} => (
       content,
@@ -172,6 +171,12 @@ ExportedMail? _mail(Map<String, Object?> m) {
     ),
     _ => ('', false),
   };
+  final body = convertMailBody(
+    body: content,
+    isHtml: isHtml,
+    bodyPreview: _text(m['bodyPreview']),
+    hasInlineImageAttachment: _hasInlineImageAttachment(m),
+  );
   return ExportedMail(
     key: key,
     keyKind: keyKind,
@@ -184,10 +189,20 @@ ExportedMail? _mail(Map<String, Object?> m) {
     importance: _text(m['importance']),
     hasAttachments: m['hasAttachments'] == true,
     body: body,
-    isHtml: isHtml,
-    bodyPreview: _text(m['bodyPreview']),
   );
 }
+
+bool _hasInlineImageAttachment(Map<String, Object?> m) =>
+    switch (m['attachments']) {
+      final List<Object?> attachments => attachments.any(
+        (a) => switch (a) {
+          {'isInline': true, 'contentType': final String type} =>
+            type.toLowerCase().startsWith('image/'),
+          _ => false,
+        },
+      ),
+      _ => false,
+    };
 
 /// 非空字符串，去掉首尾空白；其他都当作没有。
 String? _text(Object? value) => switch (value) {

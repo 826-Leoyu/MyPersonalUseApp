@@ -306,6 +306,49 @@ void main() {
     });
   });
 
+  group('正文（M-10）', () {
+    test('存的是转换后的正文和编号的链接，重新打开后还在', () async {
+      await h.importJson(
+        'mail-1.json',
+        fakeEnvelope([
+          fakeMessage(
+            internetMessageId: '<a@example.com>',
+            body:
+                '<p>Sign up <a href="https://example.com/form">here</a>.</p>'
+                '<img src="cid:poster@01DB">',
+          ),
+        ]),
+      );
+      await h.reopen();
+
+      final id = (await h.mail.watchMails().first).single.id;
+      final detail = (await h.mail.mailDetail(id))!;
+
+      expect(detail.body.text, 'Sign up here [1].\n\n[图片]');
+      expect(detail.body.links, ['https://example.com/form']);
+      expect(detail.body.hasInlineImages, isTrue);
+      expect(detail.body.possiblyIncomplete, isFalse);
+    });
+
+    test('用了 bodyPreview 的邮件标记正文可能不完整', () async {
+      await h.importJson(
+        'mail-1.json',
+        fakeEnvelope([fakeMessage(body: '', bodyPreview: 'Lunch at noon.')]),
+      );
+
+      final id = (await h.mail.watchMails().first).single.id;
+      final detail = (await h.mail.mailDetail(id))!;
+
+      expect(detail.body.text, 'Lunch at noon.');
+      expect(detail.body.links, isEmpty);
+      expect(detail.body.possiblyIncomplete, isTrue);
+    });
+
+    test('没有这封邮件时返回 null', () async {
+      expect(await h.mail.mailDetail('missing'), isNull);
+    });
+  });
+
   group('邮箱地址', () {
     test('保存规范形式，重新打开后还在', () async {
       await h.mail.setMailboxAddress('  Her@Example.COM ');

@@ -49,9 +49,8 @@ void main() {
       expect(mail.subject, '周五下午的组会改到 3 点');
       expect(mail.senderAddress, 'li.ming@example.com');
       expect(mail.receivedAt, DateTime.utc(2026, 10, 19, 13, 15));
-      expect(mail.body, '<p>大家好</p>');
-      expect(mail.isHtml, isTrue);
-      expect(mail.bodyPreview, '大家好');
+      expect(mail.body.text, '大家好');
+      expect(mail.body.possiblyIncomplete, isFalse);
       expect(mail.importance, 'high');
       expect(mail.hasAttachments, isTrue);
     });
@@ -106,8 +105,47 @@ void main() {
 
     expect(mail.senderName, 'Alex Chen');
     expect(mail.senderAddress, 'alex@example.com');
-    expect(mail.body, '<p>Hi</p>');
-    expect(mail.isHtml, isTrue);
+    expect(mail.body.text, 'Hi');
+  });
+
+  test('isHtml 为 false 的正文按纯文本处理', () {
+    final mail = parseExport(
+      encode([fakeMessage(body: 'Use <b> for bold.', isHtml: false)]),
+    ).mails.single;
+
+    expect(mail.body.text, 'Use <b> for bold.');
+  });
+
+  test('body 为空时用 bodyPreview，并标记正文可能不完整', () {
+    final mail = parseExport(
+      encode([fakeMessage(body: '', bodyPreview: 'Lunch at noon.')]),
+    ).mails.single;
+
+    expect(mail.body.text, 'Lunch at noon.');
+    expect(mail.body.possiblyIncomplete, isTrue);
+  });
+
+  test('有内嵌的图片附件时记为有内嵌图片，普通附件不算', () {
+    Map<String, Object?> withAttachment(Map<String, Object?> attachment) =>
+        fakeMessage(body: '<p>See the poster.</p>')
+          ..['attachments'] = [attachment];
+
+    final mails = parseExport(
+      encode([
+        withAttachment({
+          'name': 'image001.png',
+          'contentType': 'image/png',
+          'isInline': true,
+        }),
+        withAttachment({
+          'name': 'agenda.pdf',
+          'contentType': 'application/pdf',
+          'isInline': false,
+        }),
+      ]),
+    ).mails;
+
+    expect(mails.map((m) => m.body.hasInlineImages), [isTrue, isFalse]);
   });
 
   test('收件时间缺失或解析不了时为空', () {

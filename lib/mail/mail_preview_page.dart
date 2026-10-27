@@ -6,11 +6,12 @@ import '../board/read_failure_view.dart';
 import '../formatting/date_format.dart';
 import '../planner/planner_exceptions.dart';
 import '../settings/settings_page.dart';
+import 'mail_detail_page.dart';
 import 'mail_preview.dart';
 import 'mail_service.dart';
 
 /// 邮件预览（只在 Windows 上有）：手动选择一个导出文件导入，列出已导入的邮件
-/// 的主题、发件人和收件时间，收件时间最新的在前。
+/// 的主题、发件人和收件时间，收件时间最新的在前。点一封邮件看它的正文。
 class MailPreviewPage extends ConsumerStatefulWidget {
   const MailPreviewPage({super.key});
 
@@ -117,18 +118,18 @@ class _MailTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sender = mail.senderName ?? mail.senderAddress ?? '（未知发件人）';
     final received = mail.receivedAt;
     return ListTile(
       key: MailPreviewPage.itemKey(mail.id),
+      onTap: () => MailDetailPage.open(Navigator.of(context), mail.id),
       title: Text(
-        mail.subject.isEmpty ? '（无主题）' : mail.subject,
+        mail.displaySubject,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
       subtitle: Text(
         [
-          sender,
+          mail.displaySender,
           if (received != null) formatReceivedTime(received),
         ].join(' · '),
         maxLines: 1,
