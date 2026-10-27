@@ -451,8 +451,11 @@ class MailService {
     if (await _meta(_mailFolderKey) == null) {
       return const MailImportStatus(notices: [FolderNotSet()]);
     }
+    // 找不到文件夹时，文件的提示都不算了；分析的提示和文件夹无关，照样列出。
     if (_folderMissing) {
-      return const MailImportStatus(notices: [FolderMissing()]);
+      return MailImportStatus(
+        notices: [const FolderMissing(), ...await _analysisNotices()],
+      );
     }
     final rows = await _scanRows();
     final invalid = [

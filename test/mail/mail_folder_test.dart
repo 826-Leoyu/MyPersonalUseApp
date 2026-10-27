@@ -184,6 +184,22 @@ void main() {
 
       expect((await h.mail.importStatus()).notices, isEmpty);
     });
+
+    test('找不到文件夹时，分析的提示照样列出来', () async {
+      h.analyzer.fails('Mail a', AnalysisFailureType.notLoggedIn);
+      h.writeFile('mail-1.json', fakeEnvelope([mail('a')]));
+      await h.scanTwice();
+      await h.mail.analyzePending();
+      final renamed = h.directory.renameSync('${h.directory.path}-renamed');
+      addTearDown(() => renamed.renameSync(h.directory.path));
+
+      await h.mail.scanFolder();
+
+      expect((await h.mail.importStatus()).notices, [
+        const FolderMissing(),
+        const ClaudeNotLoggedIn(),
+      ]);
+    });
   });
 
   group('状态行（M-35）', () {
