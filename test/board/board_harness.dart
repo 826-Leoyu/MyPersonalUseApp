@@ -18,6 +18,7 @@ import 'package:my_personal_use_app/storage/planner_database.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import '../mail/fake_analyzer.dart';
+import '../mail/fake_export_source.dart';
 import '../mail/mail_fixtures.dart';
 import '../support/failing_storage.dart';
 
@@ -48,6 +49,12 @@ class BoardHarness {
 
   /// 邮件预览里点「导入文件」时选中的文件路径；为 null 时相当于取消选择。
   String? pickedMailFile;
+
+  /// 选择邮件文件夹时选中的路径；为 null 时相当于取消选择。
+  String? pickedMailFolder;
+
+  /// App 看到的邮件文件夹，都在内存里。
+  final folders = FakeExportFolders();
 
   /// App 用的分析器：按脚本返回结果，不调用真的 Claude Code。
   final analyzer = FakeAnalyzer();
@@ -116,6 +123,34 @@ class BoardHarness {
       } finally {
         await database.close();
         directory.deleteSync(recursive: true);
+      }
+    });
+  }
+
+  /// 在启动 App 之前选好邮件文件夹 [folder]，并按 [scans] 扫描几次（中间
+  /// 隔一分钟）。
+  Future<void> seedMailFolder(
+    WidgetTester tester,
+    String folder, {
+    int scans = 0,
+  }) async {
+    await tester.runAsync(() async {
+      final database = _newConnection();
+      try {
+        final service = MailService(
+          planner: PlannerService(database: database, clock: _clock),
+          analyzer: analyzer,
+          clock: _clock,
+          openFolder: folders.open,
+        );
+        await service.setMailFolder(folder);
+        for (var i = 0; i < scans; i++) {
+          if (i > 0) now = now.add(const Duration(minutes: 1));
+          await service.scanFolder();
+        }
+        await service.waitForAnalysis();
+      } finally {
+        await database.close();
       }
     });
   }
@@ -196,6 +231,8 @@ class BoardHarness {
       clockProvider.overrideWithValue(_clock),
       plannerDatabaseFactoryProvider.overrideWithValue(_openDatabase),
       pickMailExportFileProvider.overrideWithValue(() async => pickedMailFile),
+      pickMailFolderProvider.overrideWithValue(() async => pickedMailFolder),
+      mailExportSourceProvider.overrideWithValue(folders.open),
       mailAnalyzerProvider.overrideWithValue(analyzer),
       if (displayedDay case final day?)
         displayedDayProvider.overrideWithBuild((ref, _) => day),

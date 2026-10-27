@@ -1,13 +1,17 @@
-// 数据库迁移（M-1）：用 v1、v2 的数据库升级，旧数据通过 PlannerService 读回来
+// 数据库迁移（M-1）：用 v1、v2、v3 的数据库升级，旧数据通过 PlannerService 读回来
 // 都一样。
 //
 // generated_migrations/ 和 drift_schemas/ 由 drift_dev 生成。改了表结构、
 // 升了 schemaVersion 以后重新生成：
 //   dart run drift_dev schema dump lib/storage/planner_database.dart drift_schemas/
 //   dart run drift_dev schema generate drift_schemas/ test/storage/generated_migrations/
+import 'dart:io';
+
 import 'package:clock/clock.dart';
+import 'package:crypto/crypto.dart';
 import 'package:drift_dev/api/migrations_native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:my_personal_use_app/mail/mail_service.dart';
 import 'package:my_personal_use_app/planner/card_time.dart';
 import 'package:my_personal_use_app/planner/day_key.dart';
 import 'package:my_personal_use_app/planner/link_kind.dart';
@@ -15,6 +19,7 @@ import 'package:my_personal_use_app/planner/planner_service.dart';
 import 'package:my_personal_use_app/planner/task_card.dart';
 import 'package:my_personal_use_app/storage/planner_database.dart';
 
+import '../mail/mail_fixtures.dart';
 import 'generated_migrations/schema.dart';
 
 void main() {
@@ -28,12 +33,12 @@ void main() {
   int millis(DateTime time) => time.toUtc().millisecondsSinceEpoch;
   final created = millis(now.subtract(const Duration(days: 2)));
 
-  for (final from in [1, 2]) {
-    test('结构从 v$from 升级到 v3 后和新建的 v3 数据库一样', () async {
+  for (final from in [1, 2, 3]) {
+    test('结构从 v$from 升级到 v4 后和新建的 v4 数据库一样', () async {
       final schema = await verifier.schemaAt(from);
       final db = PlannerDatabase(schema.newConnection());
 
-      await verifier.migrateAndValidate(db, 3);
+      await verifier.migrateAndValidate(db, 4);
       await db.close();
     });
   }
@@ -181,7 +186,7 @@ void main() {
     await db.close();
   });
 
-  test('从 v2 升级到 v3 后，卡片的时间和 AppMeta 都和升级前一样', () async {
+  test('从 v2 升级到最新版后，卡片的时间和 AppMeta 都和升级前一样', () async {
     final schema = await verifier.schemaAt(2);
     final v2 = schema.rawDatabase;
     v2.execute(
@@ -208,8 +213,51 @@ void main() {
     final meta = await db.select(db.appMeta).get();
     expect(
       {for (final m in meta) m.key: m.value},
-      {'schemaVersion': '3', 'lastMaintenanceDay': '$today'},
+      {'schemaVersion': '${db.schemaVersion}', 'lastMaintenanceDay': '$today'},
     );
+
+    await db.close();
+  });
+
+  test('从 v3 升级到 v4 后，导入过的文件和邮件都还在，同一个文件不会再导入', () async {
+    final schema = await verifier.schemaAt(3);
+    final v3 = schema.rawDatabase;
+    final bytes = encode(fakeEnvelope([fakeMessage(subject: '旧邮件')]));
+    v3.execute(
+      'INSERT INTO mail_export_files (id, file_name, file_size, '
+      'file_modified_at, content_hash, status, mailbox, mail_count, '
+      'new_mail_count, skipped_count, first_seen_at, imported_at) '
+      "VALUES ('file', 'mail-1.json', ?, ?, ?, 'imported', "
+      "'her@example.com', 1, 1, 0, ?, ?)",
+      [
+        bytes.length,
+        created,
+        sha256.convert(bytes).toString(),
+        created,
+        created,
+      ],
+    );
+    v3.execute(
+      'INSERT INTO mails (id, mailbox, mail_key, mail_key_kind, subject, '
+      'analysis_status, source_file_id, imported_at) '
+      "VALUES ('mail', 'her@example.com', '<default@example.com>', "
+      "'internetMessageId', '旧邮件', 'done', 'file', ?)",
+      [created],
+    );
+    v3.execute(
+      "INSERT INTO app_meta (key, value) VALUES ('schemaVersion', '3')",
+    );
+
+    final db = PlannerDatabase(schema.newConnection());
+    final planner = PlannerService(database: db, clock: Clock(() => now));
+    await planner.open();
+    final mail = MailService(planner: planner, clock: Clock(() => now));
+
+    expect((await mail.watchMails().first).map((m) => m.subject), ['旧邮件']);
+    final directory = Directory.systemTemp.createTempSync('migration_');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final file = File('${directory.path}/mail-1.json')..writeAsBytesSync(bytes);
+    expect(await mail.importFile(file.path), isA<AlreadyImported>());
 
     await db.close();
   });

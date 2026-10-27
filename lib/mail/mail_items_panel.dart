@@ -8,6 +8,7 @@ import '../formatting/date_format.dart';
 import '../planner/day_key.dart';
 import '../planner/planner_exceptions.dart';
 import 'mail_detail_page.dart';
+import 'mail_import_status_line.dart';
 import 'mail_items.dart';
 import 'mail_service.dart';
 
@@ -21,6 +22,7 @@ class MailItemsPanel extends ConsumerWidget {
   const MailItemsPanel({
     super.key,
     required this.newCardPosition,
+    required this.onOpenSettings,
     this.onCollapse,
   });
 
@@ -36,6 +38,9 @@ class MailItemsPanel extends ConsumerWidget {
 
   /// 加入到 [day] 时新卡片左上角在画布上的位置。
   final Offset Function(DayKey day) newCardPosition;
+
+  /// 打开设置页（状态行上的"开始设置"）。
+  final VoidCallback onOpenSettings;
 
   /// 收起栏；为 null 时没有收起按钮（底部面板）。
   final VoidCallback? onCollapse;
@@ -71,6 +76,7 @@ class MailItemsPanel extends ConsumerWidget {
             ],
           ),
         ),
+        MailImportStatusLine(onOpenSettings: onOpenSettings),
         Expanded(
           child: switch (candidates) {
             AsyncData(value: []) => const Center(child: Text('没有新的邮件事项')),

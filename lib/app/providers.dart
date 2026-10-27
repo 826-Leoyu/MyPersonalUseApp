@@ -9,9 +9,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../mail/claude_code_analyzer.dart';
+import '../mail/export_source.dart';
+import '../mail/import_status.dart';
 import '../mail/mail_analyzer.dart';
 import '../mail/mail_items.dart';
 import '../mail/mail_preview.dart';
+import '../mail/mail_scan_schedule.dart';
 import '../mail/mail_service.dart';
 import '../planner/day_board.dart';
 import '../planner/day_counts.dart';
@@ -120,6 +123,11 @@ final mailAnalyzerProvider = Provider<MailAnalyzer>(
   (ref) => ClaudeCodeAnalyzer(),
 );
 
+/// 打开邮件文件夹的方式。测试里换成内存里的假文件夹。
+final mailExportSourceProvider = Provider<ExportSource Function(String)>(
+  (ref) => DirectoryExportSource.new,
+);
+
 /// 打开好的 [MailService]，和 [PlannerService] 共用同一个数据库。打开后
 /// 接着分析上次没分析完的邮件（M-13），不等分析结束。
 final mailServiceProvider = FutureProvider<MailService>((ref) async {
@@ -128,10 +136,57 @@ final mailServiceProvider = FutureProvider<MailService>((ref) async {
     planner: planner,
     analyzer: ref.watch(mailAnalyzerProvider),
     clock: ref.watch(clockProvider),
+    openFolder: ref.watch(mailExportSourceProvider),
   );
   unawaited(service.analyzePending());
   return service;
 }, retry: (_, _) => null);
+
+/// 自动导入：开始监听时扫描一次邮件文件夹，之后每 5 分钟一次。画布页一直
+/// 监听它。
+final mailScanScheduleProvider = FutureProvider<MailScanSchedule>((ref) async {
+  final schedule = MailScanSchedule(
+    await ref.watch(mailServiceProvider.future),
+  );
+  ref.onDispose(schedule.dispose);
+  schedule.start();
+  return schedule;
+}, retry: (_, _) => null);
+
+/// 状态行要显示的导入情况。读取失败时是错误状态。
+final mailImportStatusProvider = StreamProvider<MailImportStatus>((ref) async* {
+  final service = await ref.watch(mailServiceProvider.future);
+  yield* service.watchImportStatus();
+}, retry: (_, _) => null);
+
+/// 设置里的邮件文件夹，没有选择时为 null。修改以后 invalidate 它。
+final mailFolderProvider = FutureProvider.autoDispose<String?>((ref) async {
+  final service = await ref.watch(mailServiceProvider.future);
+  return service.mailFolder();
+}, retry: (_, _) => null);
+
+/// 让用户选择邮件文件夹，返回它的路径；取消时为 null。测试里换成直接返回
+/// 一个路径。
+final pickMailFolderProvider = Provider<Future<String?> Function()>(
+  (ref) =>
+      () => getDirectoryPath(confirmButtonText: '选择'),
+);
+
+/// 让用户选择邮件文件夹并检查。能用时保存并马上扫描；打不开时不保存。
+/// 取消时为 null。保存失败时抛出 [StorageFailure]。
+Future<FolderCheck?> chooseMailFolder(WidgetRef ref) async {
+  final path = await ref.read(pickMailFolderProvider)();
+  if (path == null) return null;
+  final service = await ref.read(mailServiceProvider.future);
+  final check = await service.checkFolder(path);
+  if (check is FolderFound) {
+    await service.setMailFolder(path);
+    ref.invalidate(mailFolderProvider);
+    final schedule = await ref.read(mailScanScheduleProvider.future);
+    unawaited(schedule.scanNow());
+  }
+  return check;
+}
 
 /// "新邮件事项"栏里的候选事项，排好序。读取失败时是错误状态。
 final mailCandidatesProvider = StreamProvider<List<MailItemCandidate>>(

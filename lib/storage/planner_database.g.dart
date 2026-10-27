@@ -2784,10 +2784,9 @@ class $MailExportFilesTable extends MailExportFiles
   late final GeneratedColumn<String> contentHash = GeneratedColumn<String>(
     'content_hash',
     aliasedName,
-    false,
+    true,
     type: DriftSqlType.string,
-    requiredDuringInsert: true,
-    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+    requiredDuringInsert: false,
   );
   @override
   late final GeneratedColumnWithTypeConverter<MailExportFileStatus, String>
@@ -2907,6 +2906,17 @@ class $MailExportFilesTable extends MailExportFiles
     type: DriftSqlType.int,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _unchangedSinceMeta = const VerificationMeta(
+    'unchangedSince',
+  );
+  @override
+  late final GeneratedColumn<int> unchangedSince = GeneratedColumn<int>(
+    'unchanged_since',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -2925,6 +2935,7 @@ class $MailExportFilesTable extends MailExportFiles
     skippedCount,
     firstSeenAt,
     importedAt,
+    unchangedSince,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -2974,8 +2985,6 @@ class $MailExportFilesTable extends MailExportFiles
           _contentHashMeta,
         ),
       );
-    } else if (isInserting) {
-      context.missing(_contentHashMeta);
     }
     if (data.containsKey('error_type')) {
       context.handle(
@@ -3054,6 +3063,15 @@ class $MailExportFilesTable extends MailExportFiles
         importedAt.isAcceptableOrUnknown(data['imported_at']!, _importedAtMeta),
       );
     }
+    if (data.containsKey('unchanged_since')) {
+      context.handle(
+        _unchangedSinceMeta,
+        unchangedSince.isAcceptableOrUnknown(
+          data['unchanged_since']!,
+          _unchangedSinceMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -3082,7 +3100,7 @@ class $MailExportFilesTable extends MailExportFiles
       contentHash: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}content_hash'],
-      )!,
+      ),
       status: $MailExportFilesTable.$converterstatus.fromSql(
         attachedDatabase.typeMapping.read(
           DriftSqlType.string,
@@ -3129,6 +3147,10 @@ class $MailExportFilesTable extends MailExportFiles
         DriftSqlType.int,
         data['${effectivePrefix}imported_at'],
       ),
+      unchangedSince: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}unchanged_since'],
+      ),
     );
   }
 
@@ -3149,7 +3171,10 @@ class MailExportFileRow extends DataClass
   final String fileName;
   final int? fileSize;
   final int? fileModifiedAt;
-  final String contentHash;
+
+  /// 还没读过（`seen`）时为空（schemaVersion 4 起可为空，并且不再唯一：
+  /// OneDrive 生成的副本和原文件内容一样）。
+  final String? contentHash;
   final MailExportFileStatus status;
   final String? errorType;
   final String? mailbox;
@@ -3163,12 +3188,15 @@ class MailExportFileRow extends DataClass
   final int? skippedCount;
   final int firstSeenAt;
   final int? importedAt;
+
+  /// 扫描时大小和修改时间从什么时候起没再变过。手动导入的文件为空。
+  final int? unchangedSince;
   const MailExportFileRow({
     required this.id,
     required this.fileName,
     this.fileSize,
     this.fileModifiedAt,
-    required this.contentHash,
+    this.contentHash,
     required this.status,
     this.errorType,
     this.mailbox,
@@ -3180,6 +3208,7 @@ class MailExportFileRow extends DataClass
     this.skippedCount,
     required this.firstSeenAt,
     this.importedAt,
+    this.unchangedSince,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -3192,7 +3221,9 @@ class MailExportFileRow extends DataClass
     if (!nullToAbsent || fileModifiedAt != null) {
       map['file_modified_at'] = Variable<int>(fileModifiedAt);
     }
-    map['content_hash'] = Variable<String>(contentHash);
+    if (!nullToAbsent || contentHash != null) {
+      map['content_hash'] = Variable<String>(contentHash);
+    }
     {
       map['status'] = Variable<String>(
         $MailExportFilesTable.$converterstatus.toSql(status),
@@ -3226,6 +3257,9 @@ class MailExportFileRow extends DataClass
     if (!nullToAbsent || importedAt != null) {
       map['imported_at'] = Variable<int>(importedAt);
     }
+    if (!nullToAbsent || unchangedSince != null) {
+      map['unchanged_since'] = Variable<int>(unchangedSince);
+    }
     return map;
   }
 
@@ -3239,7 +3273,9 @@ class MailExportFileRow extends DataClass
       fileModifiedAt: fileModifiedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(fileModifiedAt),
-      contentHash: Value(contentHash),
+      contentHash: contentHash == null && nullToAbsent
+          ? const Value.absent()
+          : Value(contentHash),
       status: Value(status),
       errorType: errorType == null && nullToAbsent
           ? const Value.absent()
@@ -3269,6 +3305,9 @@ class MailExportFileRow extends DataClass
       importedAt: importedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(importedAt),
+      unchangedSince: unchangedSince == null && nullToAbsent
+          ? const Value.absent()
+          : Value(unchangedSince),
     );
   }
 
@@ -3282,7 +3321,7 @@ class MailExportFileRow extends DataClass
       fileName: serializer.fromJson<String>(json['fileName']),
       fileSize: serializer.fromJson<int?>(json['fileSize']),
       fileModifiedAt: serializer.fromJson<int?>(json['fileModifiedAt']),
-      contentHash: serializer.fromJson<String>(json['contentHash']),
+      contentHash: serializer.fromJson<String?>(json['contentHash']),
       status: $MailExportFilesTable.$converterstatus.fromJson(
         serializer.fromJson<String>(json['status']),
       ),
@@ -3296,6 +3335,7 @@ class MailExportFileRow extends DataClass
       skippedCount: serializer.fromJson<int?>(json['skippedCount']),
       firstSeenAt: serializer.fromJson<int>(json['firstSeenAt']),
       importedAt: serializer.fromJson<int?>(json['importedAt']),
+      unchangedSince: serializer.fromJson<int?>(json['unchangedSince']),
     );
   }
   @override
@@ -3306,7 +3346,7 @@ class MailExportFileRow extends DataClass
       'fileName': serializer.toJson<String>(fileName),
       'fileSize': serializer.toJson<int?>(fileSize),
       'fileModifiedAt': serializer.toJson<int?>(fileModifiedAt),
-      'contentHash': serializer.toJson<String>(contentHash),
+      'contentHash': serializer.toJson<String?>(contentHash),
       'status': serializer.toJson<String>(
         $MailExportFilesTable.$converterstatus.toJson(status),
       ),
@@ -3320,6 +3360,7 @@ class MailExportFileRow extends DataClass
       'skippedCount': serializer.toJson<int?>(skippedCount),
       'firstSeenAt': serializer.toJson<int>(firstSeenAt),
       'importedAt': serializer.toJson<int?>(importedAt),
+      'unchangedSince': serializer.toJson<int?>(unchangedSince),
     };
   }
 
@@ -3328,7 +3369,7 @@ class MailExportFileRow extends DataClass
     String? fileName,
     Value<int?> fileSize = const Value.absent(),
     Value<int?> fileModifiedAt = const Value.absent(),
-    String? contentHash,
+    Value<String?> contentHash = const Value.absent(),
     MailExportFileStatus? status,
     Value<String?> errorType = const Value.absent(),
     Value<String?> mailbox = const Value.absent(),
@@ -3340,6 +3381,7 @@ class MailExportFileRow extends DataClass
     Value<int?> skippedCount = const Value.absent(),
     int? firstSeenAt,
     Value<int?> importedAt = const Value.absent(),
+    Value<int?> unchangedSince = const Value.absent(),
   }) => MailExportFileRow(
     id: id ?? this.id,
     fileName: fileName ?? this.fileName,
@@ -3347,7 +3389,7 @@ class MailExportFileRow extends DataClass
     fileModifiedAt: fileModifiedAt.present
         ? fileModifiedAt.value
         : this.fileModifiedAt,
-    contentHash: contentHash ?? this.contentHash,
+    contentHash: contentHash.present ? contentHash.value : this.contentHash,
     status: status ?? this.status,
     errorType: errorType.present ? errorType.value : this.errorType,
     mailbox: mailbox.present ? mailbox.value : this.mailbox,
@@ -3363,6 +3405,9 @@ class MailExportFileRow extends DataClass
     skippedCount: skippedCount.present ? skippedCount.value : this.skippedCount,
     firstSeenAt: firstSeenAt ?? this.firstSeenAt,
     importedAt: importedAt.present ? importedAt.value : this.importedAt,
+    unchangedSince: unchangedSince.present
+        ? unchangedSince.value
+        : this.unchangedSince,
   );
   MailExportFileRow copyWithCompanion(MailExportFilesCompanion data) {
     return MailExportFileRow(
@@ -3400,6 +3445,9 @@ class MailExportFileRow extends DataClass
       importedAt: data.importedAt.present
           ? data.importedAt.value
           : this.importedAt,
+      unchangedSince: data.unchangedSince.present
+          ? data.unchangedSince.value
+          : this.unchangedSince,
     );
   }
 
@@ -3421,7 +3469,8 @@ class MailExportFileRow extends DataClass
           ..write('newMailCount: $newMailCount, ')
           ..write('skippedCount: $skippedCount, ')
           ..write('firstSeenAt: $firstSeenAt, ')
-          ..write('importedAt: $importedAt')
+          ..write('importedAt: $importedAt, ')
+          ..write('unchangedSince: $unchangedSince')
           ..write(')'))
         .toString();
   }
@@ -3444,6 +3493,7 @@ class MailExportFileRow extends DataClass
     skippedCount,
     firstSeenAt,
     importedAt,
+    unchangedSince,
   );
   @override
   bool operator ==(Object other) =>
@@ -3464,7 +3514,8 @@ class MailExportFileRow extends DataClass
           other.newMailCount == this.newMailCount &&
           other.skippedCount == this.skippedCount &&
           other.firstSeenAt == this.firstSeenAt &&
-          other.importedAt == this.importedAt);
+          other.importedAt == this.importedAt &&
+          other.unchangedSince == this.unchangedSince);
 }
 
 class MailExportFilesCompanion extends UpdateCompanion<MailExportFileRow> {
@@ -3472,7 +3523,7 @@ class MailExportFilesCompanion extends UpdateCompanion<MailExportFileRow> {
   final Value<String> fileName;
   final Value<int?> fileSize;
   final Value<int?> fileModifiedAt;
-  final Value<String> contentHash;
+  final Value<String?> contentHash;
   final Value<MailExportFileStatus> status;
   final Value<String?> errorType;
   final Value<String?> mailbox;
@@ -3484,6 +3535,7 @@ class MailExportFilesCompanion extends UpdateCompanion<MailExportFileRow> {
   final Value<int?> skippedCount;
   final Value<int> firstSeenAt;
   final Value<int?> importedAt;
+  final Value<int?> unchangedSince;
   final Value<int> rowid;
   const MailExportFilesCompanion({
     this.id = const Value.absent(),
@@ -3502,6 +3554,7 @@ class MailExportFilesCompanion extends UpdateCompanion<MailExportFileRow> {
     this.skippedCount = const Value.absent(),
     this.firstSeenAt = const Value.absent(),
     this.importedAt = const Value.absent(),
+    this.unchangedSince = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   MailExportFilesCompanion.insert({
@@ -3509,7 +3562,7 @@ class MailExportFilesCompanion extends UpdateCompanion<MailExportFileRow> {
     required String fileName,
     this.fileSize = const Value.absent(),
     this.fileModifiedAt = const Value.absent(),
-    required String contentHash,
+    this.contentHash = const Value.absent(),
     required MailExportFileStatus status,
     this.errorType = const Value.absent(),
     this.mailbox = const Value.absent(),
@@ -3521,10 +3574,10 @@ class MailExportFilesCompanion extends UpdateCompanion<MailExportFileRow> {
     this.skippedCount = const Value.absent(),
     required int firstSeenAt,
     this.importedAt = const Value.absent(),
+    this.unchangedSince = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        fileName = Value(fileName),
-       contentHash = Value(contentHash),
        status = Value(status),
        firstSeenAt = Value(firstSeenAt);
   static Insertable<MailExportFileRow> custom({
@@ -3544,6 +3597,7 @@ class MailExportFilesCompanion extends UpdateCompanion<MailExportFileRow> {
     Expression<int>? skippedCount,
     Expression<int>? firstSeenAt,
     Expression<int>? importedAt,
+    Expression<int>? unchangedSince,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -3564,6 +3618,7 @@ class MailExportFilesCompanion extends UpdateCompanion<MailExportFileRow> {
       if (skippedCount != null) 'skipped_count': skippedCount,
       if (firstSeenAt != null) 'first_seen_at': firstSeenAt,
       if (importedAt != null) 'imported_at': importedAt,
+      if (unchangedSince != null) 'unchanged_since': unchangedSince,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -3573,7 +3628,7 @@ class MailExportFilesCompanion extends UpdateCompanion<MailExportFileRow> {
     Value<String>? fileName,
     Value<int?>? fileSize,
     Value<int?>? fileModifiedAt,
-    Value<String>? contentHash,
+    Value<String?>? contentHash,
     Value<MailExportFileStatus>? status,
     Value<String?>? errorType,
     Value<String?>? mailbox,
@@ -3585,6 +3640,7 @@ class MailExportFilesCompanion extends UpdateCompanion<MailExportFileRow> {
     Value<int?>? skippedCount,
     Value<int>? firstSeenAt,
     Value<int?>? importedAt,
+    Value<int?>? unchangedSince,
     Value<int>? rowid,
   }) {
     return MailExportFilesCompanion(
@@ -3604,6 +3660,7 @@ class MailExportFilesCompanion extends UpdateCompanion<MailExportFileRow> {
       skippedCount: skippedCount ?? this.skippedCount,
       firstSeenAt: firstSeenAt ?? this.firstSeenAt,
       importedAt: importedAt ?? this.importedAt,
+      unchangedSince: unchangedSince ?? this.unchangedSince,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -3661,6 +3718,9 @@ class MailExportFilesCompanion extends UpdateCompanion<MailExportFileRow> {
     if (importedAt.present) {
       map['imported_at'] = Variable<int>(importedAt.value);
     }
+    if (unchangedSince.present) {
+      map['unchanged_since'] = Variable<int>(unchangedSince.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -3686,6 +3746,7 @@ class MailExportFilesCompanion extends UpdateCompanion<MailExportFileRow> {
           ..write('skippedCount: $skippedCount, ')
           ..write('firstSeenAt: $firstSeenAt, ')
           ..write('importedAt: $importedAt, ')
+          ..write('unchangedSince: $unchangedSince, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();

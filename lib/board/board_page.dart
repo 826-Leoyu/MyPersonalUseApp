@@ -91,7 +91,10 @@ class _BoardPageState extends ConsumerState<BoardPage> {
     showDragHandle: true,
     builder: (context) => SizedBox(
       height: MediaQuery.sizeOf(context).height * 0.6,
-      child: MailItemsPanel(newCardPosition: _newCardPosition),
+      child: MailItemsPanel(
+        newCardPosition: _newCardPosition,
+        onOpenSettings: () => _leaveBoardTo(SettingsPage.open),
+      ),
     ),
   );
 
@@ -112,6 +115,8 @@ class _BoardPageState extends ConsumerState<BoardPage> {
   Widget _buildPage(BuildContext context, {required bool wide}) {
     final today = ref.watch(todayProvider);
     final day = ref.watch(displayedDayProvider);
+    // 画布页开着就自动导入邮件。
+    if (mailAvailable) ref.watch(mailScanScheduleProvider);
     // 画布内容依赖打开好的 service，所以打不开时这里也是错误状态。
     final board = ref.watch(dayBoardProvider(day));
     if (board case AsyncError(:final error)) {
@@ -221,6 +226,7 @@ class _BoardPageState extends ConsumerState<BoardPage> {
           ? MailItemsSidePanel(
               child: MailItemsPanel(
                 newCardPosition: _newCardPosition,
+                onOpenSettings: () => _leaveBoardTo(SettingsPage.open),
                 onCollapse: () => setState(() => _mailPanelOpen = false),
               ),
             )

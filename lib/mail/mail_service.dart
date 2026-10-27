@@ -17,6 +17,8 @@ import '../planner/task_card.dart';
 import '../storage/planner_database.dart';
 import 'body_text.dart';
 import 'export_parser.dart';
+import 'export_source.dart';
+import 'import_status.dart';
 import 'mail_analyzer.dart';
 import 'mail_items.dart';
 import 'mail_preview.dart';
@@ -83,12 +85,27 @@ class MailService {
     this._clock = const Clock(),
     String Function()? generateId,
     String Function()? timeZoneName,
+    ExportSource Function(String folder)? openFolder,
   }) : _planner = planner,
+       _openFolder = openFolder ?? DirectoryExportSource.new,
        _db = planner.database,
        _generateId = generateId ?? const Uuid().v4,
        _timeZoneName = timeZoneName ?? (() => clock.now().timeZoneName);
 
   static const _mailboxAddressKey = 'mailboxAddress';
+  static const _mailFolderKey = 'mailFolder';
+  static const _mailFolderChosenAtKey = 'mailFolderChosenAt';
+  static const _lastImportAtKey = 'lastImportAt';
+  static const _lastImportNewMailsKey = 'lastImportNewMails';
+
+  /// 云端流程每次导出多少封（流程里的 Top）。文件里正好这么多封时算满的。
+  static const exportBatchSize = 200;
+
+  /// 导入以后多久删除导出文件。
+  static const keepExportFilesFor = Duration(days: 14);
+
+  /// 多久没有新的导出文件就提醒检查流程。
+  static const noNewFilesAfter = Duration(days: 2);
 
   /// "可能相关的现有事项"里，不在同一讨论的事项最多看多久以前的。
   static const relatedItemWindow = Duration(days: 30);
@@ -102,6 +119,7 @@ class MailService {
   final Clock _clock;
   final String Function() _generateId;
   final String Function() _timeZoneName;
+  final ExportSource Function(String folder) _openFolder;
 
   /// 手动选择一个导出文件导入。走和自动扫描一样的解析和入库规则，但不检查
   /// 文件名和文件是否稳定。
@@ -119,25 +137,379 @@ class MailService {
     } on FileSystemException {
       return UnreadableFile(fileName);
     }
+    final outcome = await _importBytes(
+      bytes,
+      fileName: fileName,
+      fileModifiedAt: stat.modified.toUtc().millisecondsSinceEpoch,
+    );
+    // 新入库的邮件自动分析（M-13），不等分析结束。
+    if (outcome case Imported(newMailCount: > 0)) unawaited(analyzePending());
+    return outcome;
+  }
+
+  /// [scanRow] 是扫描邮件文件夹时这个文件的那一行；手动导入时为 null。
+  Future<ImportOutcome> _importBytes(
+    List<int> bytes, {
+    required String fileName,
+    required int fileModifiedAt,
+    MailExportFileRow? scanRow,
+  }) async {
     final ExportBatch batch;
     try {
       batch = parseExport(bytes);
     } on InvalidExportFile catch (e) {
       return InvalidFile(fileName, e.error);
     }
-    final outcome = await _write(
+    return _write(
       () => _import(
         batch,
         fileName: fileName,
         contentHash: sha256.convert(bytes).toString(),
         fileSize: bytes.length,
-        fileModifiedAt: stat.modified.toUtc().millisecondsSinceEpoch,
+        fileModifiedAt: fileModifiedAt,
+        scanRow: scanRow,
       ),
     );
-    // 新入库的邮件自动分析（M-13），不等分析结束。
-    if (outcome case Imported(newMailCount: > 0)) unawaited(analyzePending());
-    return outcome;
   }
+
+  // ---- 邮件文件夹 ----
+
+  /// 设置里的邮件文件夹，没有选择时为 null。
+  Future<String?> mailFolder() => _read(() => _meta(_mailFolderKey));
+
+  /// 检查 [path] 能不能作为邮件文件夹，不改动任何东西。
+  Future<FolderCheck> checkFolder(String path) async {
+    final List<ExportFileInfo> files;
+    try {
+      files = await _openFolder(path).list();
+    } on ExportFolderUnavailable {
+      return const FolderUnavailable();
+    }
+    return FolderFound(
+      fileCount: files.length,
+      latestFileAt: files
+          .map((f) => f.modifiedAt)
+          .fold<DateTime?>(null, (a, b) => a == null || b.isAfter(a) ? b : a),
+    );
+  }
+
+  /// 选择邮件文件夹。路径只存在本机的数据库里。
+  ///
+  /// 换了文件夹时，旧文件夹里还没导入的文件和格式错误的文件不再记着；导入
+  /// 过的文件留着去重和检查空档用，但不再按文件名对应新文件夹里的文件。
+  Future<void> setMailFolder(String path) => _write(() async {
+    if (await _meta(_mailFolderKey) case final old? when old != path) {
+      final files = _db.mailExportFiles;
+      await (_db.delete(files)..where(
+            (f) =>
+                f.unchangedSince.isNotNull() &
+                f.status.isInValues([
+                  MailExportFileStatus.seen,
+                  MailExportFileStatus.needsMailbox,
+                  MailExportFileStatus.invalid,
+                ]),
+          ))
+          .go();
+      await (_db.update(files)..where((f) => f.unchangedSince.isNotNull()))
+          .write(const MailExportFilesCompanion(unchangedSince: Value(null)));
+    }
+    await _setMeta(_mailFolderKey, path);
+    await _setMeta(_mailFolderChosenAtKey, '$_nowMillis');
+  });
+
+  /// 解析失败的文件稳定多久以后算格式错误；之前当作还在同步。
+  static const invalidAfter = Duration(minutes: 10);
+
+  Future<void>? _scanRun;
+
+  /// 上一次扫描时邮件文件夹不可用。
+  bool _folderMissing = false;
+
+  /// 每次扫描结束时发出一个事件。
+  final _scanned = StreamController<void>.broadcast(sync: true);
+
+  /// 扫描邮件文件夹，导入可以读的导出文件（spec 0002"导入规则"）。正在
+  /// 扫描时不另开一次，返回正在进行的这一次。
+  ///
+  /// 第一次看到的文件、大小或修改时间和上次扫描时不一样的文件只记下来，
+  /// 下一次扫描才读取；看到过的文件记在数据库里，重启后也算数。
+  Future<void> scanFolder() => _scanRun ??= _scan().whenComplete(() {
+    _scanRun = null;
+    _scanned.add(null);
+  });
+
+  Future<void> _scan() async {
+    final folder = await mailFolder();
+    if (folder == null) return;
+    final source = _openFolder(folder);
+    final List<ExportFileInfo> files;
+    try {
+      files = await source.list();
+      _folderMissing = false;
+    } on ExportFolderUnavailable {
+      _folderMissing = true;
+      return;
+    }
+    final rows = {for (final row in await _read(_scanRows)) row.fileName: row};
+    // 还没读过的或格式错误的文件不见了：不再记着它。
+    final names = {for (final file in files) file.name};
+    final vanished = [
+      for (final row in rows.values)
+        if (!names.contains(row.fileName) &&
+            (row.status == MailExportFileStatus.seen ||
+                row.status == MailExportFileStatus.needsMailbox ||
+                row.status == MailExportFileStatus.invalid))
+          row.id,
+    ];
+    if (vanished.isNotEmpty) {
+      await _write(
+        () => (_db.delete(
+          _db.mailExportFiles,
+        )..where((f) => f.id.isIn(vanished))).go(),
+      );
+    }
+    var importedFiles = 0;
+    var newMails = 0;
+    for (final file in files) {
+      final size = file.size;
+      final modifiedAt = file.modifiedAt.millisecondsSinceEpoch;
+      final row = rows[file.name];
+      if (row == null) {
+        final now = _nowMillis;
+        await _write(
+          () => _db
+              .into(_db.mailExportFiles)
+              .insert(
+                MailExportFilesCompanion.insert(
+                  id: _generateId(),
+                  fileName: file.name,
+                  fileSize: Value(size),
+                  fileModifiedAt: Value(modifiedAt),
+                  status: MailExportFileStatus.seen,
+                  firstSeenAt: now,
+                  unchangedSince: Value(now),
+                ),
+              ),
+        );
+        continue;
+      }
+      if (row.status
+          case MailExportFileStatus.imported ||
+              MailExportFileStatus.invalid ||
+              MailExportFileStatus.deleted) {
+        continue;
+      }
+      if (row.fileSize != size || row.fileModifiedAt != modifiedAt) {
+        await _updateFile(
+          row.id,
+          MailExportFilesCompanion(
+            fileSize: Value(size),
+            fileModifiedAt: Value(modifiedAt),
+            unchangedSince: Value(_nowMillis),
+          ),
+        );
+        continue;
+      }
+      final List<int> bytes;
+      try {
+        bytes = await source.read(file.name);
+      } on ExportFileUnreadable {
+        continue;
+      }
+      final outcome = await _importBytes(
+        bytes,
+        fileName: file.name,
+        fileModifiedAt: modifiedAt,
+        scanRow: row,
+      );
+      switch (outcome) {
+        case Imported(:final newMailCount):
+          importedFiles++;
+          newMails += newMailCount;
+        case InvalidFile(:final error)
+            when _nowMillis - row.unchangedSince! >=
+                invalidAfter.inMilliseconds:
+          await _updateFile(
+            row.id,
+            MailExportFilesCompanion(
+              status: const Value(MailExportFileStatus.invalid),
+              errorType: Value(error.name),
+            ),
+          );
+        default:
+      }
+    }
+    if (importedFiles > 0) {
+      await _write(() async {
+        await _setMeta(_lastImportAtKey, '$_nowMillis');
+        await _setMeta(_lastImportNewMailsKey, '$newMails');
+      });
+    }
+    await _deleteOldFiles(source);
+    if (newMails > 0) unawaited(analyzePending());
+  }
+
+  /// 删除导入超过 14 天、其中的邮件都不再待分析的导出文件。格式错误的文件
+  /// 留给人看，不删。删不掉的下次再试。
+  Future<void> _deleteOldFiles(ExportSource source) async {
+    final before = _nowMillis - keepExportFilesFor.inMilliseconds;
+    final files = _db.mailExportFiles;
+    final pending = _db.mails.analysisStatus.equalsValue(
+      MailAnalysisStatus.pending,
+    );
+    final old = await _read(
+      () =>
+          (_db.select(files)..where(
+                (f) =>
+                    f.unchangedSince.isNotNull() &
+                    f.status.equalsValue(MailExportFileStatus.imported) &
+                    f.importedAt.isSmallerThanValue(before) &
+                    notExistsQuery(
+                      _db.select(
+                        _db.mails,
+                      )..where((m) => m.sourceFileId.equalsExp(f.id) & pending),
+                    ),
+              ))
+              .get(),
+    );
+    for (final file in old) {
+      try {
+        await source.delete(file.fileName);
+      } on ExportFileUnreadable {
+        continue;
+      }
+      await _updateFile(
+        file.id,
+        const MailExportFilesCompanion(
+          status: Value(MailExportFileStatus.deleted),
+        ),
+      );
+    }
+  }
+
+  /// 导入情况的变化：先发出现在的，之后数据库里的导入记录变了、或者扫描
+  /// 结束时再发出。
+  Stream<MailImportStatus> watchImportStatus() {
+    late final StreamController<MailImportStatus> controller;
+    final subscriptions = <StreamSubscription<void>>[];
+    var latest = Future<void>.value();
+    // 一次一次按顺序读，后读的结果不会被先读的盖掉。
+    void refresh() => latest = latest.then(
+      (_) => importStatus().then(controller.add, onError: controller.addError),
+    );
+    controller = StreamController(
+      onListen: () {
+        refresh();
+        subscriptions
+          ..add(
+            _db
+                .tableUpdates(
+                  TableUpdateQuery.onAllTables([
+                    _db.mailExportFiles,
+                    _db.appMeta,
+                  ]),
+                )
+                .listen((_) => refresh()),
+          )
+          ..add(_scanned.stream.listen((_) => refresh()));
+      },
+      onCancel: () async {
+        for (final subscription in subscriptions) {
+          await subscription.cancel();
+        }
+        await latest;
+      },
+    );
+    return controller.stream;
+  }
+
+  /// 现在的导入情况。
+  Future<MailImportStatus> importStatus() => _read(() async {
+    if (await _meta(_mailFolderKey) == null) {
+      return const MailImportStatus(notices: [FolderNotSet()]);
+    }
+    if (_folderMissing) {
+      return const MailImportStatus(notices: [FolderMissing()]);
+    }
+    final rows = await _scanRows();
+    final invalid = [
+      for (final row in rows)
+        if (row.status == MailExportFileStatus.invalid) row.fileName,
+    ]..sort();
+    // 格式错误的文件不算新文件，它另有提示。
+    final lastNewFileAt = [
+      for (final row in rows)
+        if (row.status != MailExportFileStatus.invalid) row.firstSeenAt,
+      if (await _meta(_mailFolderChosenAtKey) case final chosen?)
+        int.parse(chosen),
+    ].fold<int?>(null, (a, b) => a == null || b > a ? b : a);
+    final lastImportAt = await _meta(_lastImportAtKey);
+    return MailImportStatus(
+      notices: [
+        if (rows.any((r) => r.status == MailExportFileStatus.seen))
+          const FilesSyncing(),
+        if (invalid.isNotEmpty) FormatErrors(invalid),
+        if (lastNewFileAt != null &&
+            _nowMillis - lastNewFileAt > noNewFilesAfter.inMilliseconds)
+          NoNewFiles(_fromMillis(lastNewFileAt)!),
+        if (await _hasGap()) const PossiblyMissedMails(),
+      ],
+      lastImportAt: _fromMillis(int.tryParse(lastImportAt ?? '')),
+      lastImportNewMailCount: int.parse(
+        await _meta(_lastImportNewMailsKey) ?? '0',
+      ),
+    );
+  });
+
+  /// 按收件时间排开所有导入过的文件，有一个文件最早的邮件比它前面所有
+  /// 文件最晚的邮件还晚，并且这两个文件都是满的（spec 0002"导入规则·空档
+  /// 检查"）。后面那个文件导入超过 14 天以后不再算；补读的文件把空档盖住
+  /// 以后也不再算。
+  Future<bool> _hasGap() async {
+    final files =
+        await (_db.select(_db.mailExportFiles)
+              ..where(
+                (f) =>
+                    f.earliestReceivedAt.isNotNull() &
+                    f.status.isInValues([
+                      MailExportFileStatus.imported,
+                      MailExportFileStatus.deleted,
+                    ]),
+              )
+              ..orderBy([
+                (f) => OrderingTerm.asc(f.earliestReceivedAt),
+                (f) => OrderingTerm.desc(f.latestReceivedAt),
+              ]))
+            .get();
+    final recent = _nowMillis - keepExportFilesFor.inMilliseconds;
+    // 到目前为止收件时间最晚的那个文件。
+    MailExportFileRow? reach;
+    for (final file in files) {
+      if (reach != null &&
+          file.earliestReceivedAt! > reach.latestReceivedAt! &&
+          file.importedAt! >= recent &&
+          file.mailCount == exportBatchSize &&
+          reach.mailCount == exportBatchSize) {
+        return true;
+      }
+      if (reach == null || file.latestReceivedAt! > reach.latestReceivedAt!) {
+        reach = file;
+      }
+    }
+    return false;
+  }
+
+  /// 扫描邮件文件夹时记下的文件，一个文件名一行。
+  Future<List<MailExportFileRow>> _scanRows() => (_db.select(
+    _db.mailExportFiles,
+  )..where((f) => f.unchangedSince.isNotNull())).get();
+
+  Future<void> _updateFile(String id, MailExportFilesCompanion changes) =>
+      _write(
+        () => (_db.update(
+          _db.mailExportFiles,
+        )..where((f) => f.id.equals(id))).write(changes),
+      );
 
   Future<ImportOutcome> _import(
     ExportBatch batch, {
@@ -145,14 +517,32 @@ class MailService {
     required String contentHash,
     required int fileSize,
     required int fileModifiedAt,
+    MailExportFileRow? scanRow,
   }) async {
-    final existing = await (_db.select(
+    final sameContent = await (_db.select(
       _db.mailExportFiles,
-    )..where((f) => f.contentHash.equals(contentHash))).getSingleOrNull();
-    if (existing?.status == MailExportFileStatus.imported) {
+    )..where((f) => f.contentHash.equals(contentHash))).get();
+    final now = _nowMillis;
+    if (sameContent.any((f) => f.status == MailExportFileStatus.imported)) {
+      // 扫描到的副本也记为已导入，以后不再读取，到时候一起清理。
+      if (scanRow != null) {
+        await (_db.update(
+          _db.mailExportFiles,
+        )..where((f) => f.id.equals(scanRow.id))).write(
+          MailExportFilesCompanion(
+            contentHash: Value(contentHash),
+            status: const Value(MailExportFileStatus.imported),
+            newMailCount: const Value(0),
+            importedAt: Value(now),
+          ),
+        );
+      }
       return AlreadyImported(fileName);
     }
-    final now = _nowMillis;
+    // 手动导入时沿用同一内容以前手动导入的那一行（比如之前停在需要邮箱）。
+    final existing =
+        scanRow ??
+        sameContent.where((f) => f.unchangedSince == null).firstOrNull;
     final fileId = existing?.id ?? _generateId();
     final fileRow = MailExportFilesCompanion(
       id: Value(fileId),
@@ -715,12 +1105,18 @@ class MailService {
   /// 设置里的邮箱地址，没有填写时为 null。
   Future<String?> mailboxAddress() => _read(_mailboxAddress);
 
-  Future<String?> _mailboxAddress() async {
+  Future<String?> _mailboxAddress() => _meta(_mailboxAddressKey);
+
+  Future<String?> _meta(String key) async {
     final row = await (_db.select(
       _db.appMeta,
-    )..where((m) => m.key.equals(_mailboxAddressKey))).getSingleOrNull();
+    )..where((m) => m.key.equals(key))).getSingleOrNull();
     return row?.value;
   }
+
+  Future<void> _setMeta(String key, String value) => _db
+      .into(_db.appMeta)
+      .insertOnConflictUpdate(AppMetaCompanion.insert(key: key, value: value));
 
   /// 修改设置里的邮箱地址；为 null 或空白时清空。保存规范形式
   /// （见 [normalizeMailbox]）。格式不对时抛出 [InvalidInput]。
@@ -737,11 +1133,7 @@ class MailService {
           _db.appMeta,
         )..where((m) => m.key.equals(_mailboxAddressKey))).go();
       } else {
-        await _db
-            .into(_db.appMeta)
-            .insertOnConflictUpdate(
-              AppMetaCompanion.insert(key: _mailboxAddressKey, value: clean),
-            );
+        await _setMeta(_mailboxAddressKey, clean);
       }
     });
   }
