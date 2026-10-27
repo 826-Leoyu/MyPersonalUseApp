@@ -126,6 +126,9 @@ class MailService {
   /// 输出格式不对累计多少次以后标为失败。
   static const maxInvalidOutputs = 3;
 
+  /// 邮件正文已经清除时的提示。
+  static const bodyClearedMessage = '原文已清理，请在 Outlook 中查看';
+
   final PlannerService _planner;
   final PlannerDatabase _db;
   final MailAnalyzer? _analyzer;
@@ -411,30 +414,35 @@ class MailService {
 
   /// 导入和分析情况的变化：先发出现在的，之后数据库里的导入记录、邮件变了，
   /// 或者扫描结束时再发出。
-  Stream<MailImportStatus> watchImportStatus() {
-    late final StreamController<MailImportStatus> controller;
+  Stream<MailImportStatus> watchImportStatus() => _watchTables(
+    [_db.mailExportFiles, _db.mails, _db.appMeta],
+    importStatus,
+    alsoOn: _scanned.stream,
+  );
+
+  /// 先发出 [read] 现在的结果，之后 [tables] 里的表变了、或者 [alsoOn] 有
+  /// 事件时再读一次发出。
+  Stream<T> _watchTables<T>(
+    List<TableInfo> tables,
+    Future<T> Function() read, {
+    Stream<void>? alsoOn,
+  }) {
+    late final StreamController<T> controller;
     final subscriptions = <StreamSubscription<void>>[];
     var latest = Future<void>.value();
     // 一次一次按顺序读，后读的结果不会被先读的盖掉。
     void refresh() => latest = latest.then(
-      (_) => importStatus().then(controller.add, onError: controller.addError),
+      (_) => read().then(controller.add, onError: controller.addError),
     );
     controller = StreamController(
       onListen: () {
         refresh();
-        subscriptions
-          ..add(
-            _db
-                .tableUpdates(
-                  TableUpdateQuery.onAllTables([
-                    _db.mailExportFiles,
-                    _db.mails,
-                    _db.appMeta,
-                  ]),
-                )
-                .listen((_) => refresh()),
-          )
-          ..add(_scanned.stream.listen((_) => refresh()));
+        subscriptions.add(
+          _db
+              .tableUpdates(TableUpdateQuery.onAllTables(tables))
+              .listen((_) => refresh()),
+        );
+        if (alsoOn != null) subscriptions.add(alsoOn.listen((_) => refresh()));
       },
       onCancel: () async {
         for (final subscription in subscriptions) {
@@ -787,7 +795,8 @@ class MailService {
           );
           if (mail == null) break;
           _tried.add(mail.id);
-          final counts = !_manuallyRetried.remove(mail.id);
+          final counts =
+              !_manuallyRetried.remove(mail.id) && !mail.markedUseful;
           if (!await _analyzeOne(mail, countsTowardLimit: counts)) {
             // Claude 现在用不了，这一轮里来的请求再试也一样失败。
             _analyzeAgain = false;
@@ -875,10 +884,38 @@ class MailService {
     await analyzePending();
   }
 
+  /// "已过滤的邮件"里的 [这封有用]：这封邮件重新分析，要求按需要行动处理
+  /// （M-19）。不计入每天的上限，暂停时也分析。只改 DailyNote 里的记录，
+  /// 不动 Outlook。
+  ///
+  /// 正文已经清除时抛出 [InvalidState]，提示 [bodyClearedMessage]，邮件不变。
+  Future<void> markUseful(String mailId) async {
+    await _write(() async {
+      final mail = await (_db.select(
+        _db.mails,
+      )..where((m) => m.id.equals(mailId))).getSingleOrNull();
+      if (mail == null) throw NotFound('找不到邮件 $mailId');
+      if (mail.bodyClearedAt != null) {
+        throw const InvalidState(bodyClearedMessage);
+      }
+      await (_db.update(_db.mails)..where((m) => m.id.equals(mailId))).write(
+        const MailsCompanion(
+          markedUseful: Value(true),
+          analysisStatus: Value(MailAnalysisStatus.pending),
+          analysisFailureType: Value(null),
+          analysisFailureCount: Value(0),
+        ),
+      );
+    });
+    _tried.remove(mailId);
+    await analyzePending();
+  }
+
   /// 等正在进行的这一轮分析结束；没有在分析时马上完成。关闭数据库前调用。
   Future<void> waitForAnalysis() => _analysisRun ?? Future.value();
 
-  /// 下一封要分析的邮件。[only] 不为 null 时只在这些邮件里找。
+  /// 下一封要分析的邮件。[only] 不为 null 时只在这些邮件和点了
+  /// [这封有用] 的邮件里找。
   Future<MailRow?> _nextPending({Set<String>? only}) =>
       (_db.select(_db.mails)
             ..where(
@@ -886,7 +923,9 @@ class MailService {
                   m.analysisStatus.equalsValue(MailAnalysisStatus.pending) &
                   _waitsForUser(m).not() &
                   m.id.isNotIn(_tried) &
-                  (only == null ? const Constant(true) : m.id.isIn(only)),
+                  (only == null
+                      ? const Constant(true)
+                      : m.id.isIn(only) | m.markedUseful),
             )
             ..orderBy([
               (m) => OrderingTerm(
@@ -1042,7 +1081,9 @@ class MailService {
     );
   }
 
-  /// 保存分析结果。需要行动和可选活动的事项成为候选事项。
+  /// 保存分析结果。需要行动和可选活动的事项成为候选事项。点了 [这封有用]
+  /// 的邮件不看分类，事项都成为候选；一个事项也没有时生成一个以邮件主题为
+  /// 标题的候选。
   ///
   /// 结果里引用现有事项的更新（`updates`）现在也先当作新的候选，记下相关
   /// 事项；按事项状态处理更新的规则在 #88。
@@ -1069,8 +1110,16 @@ class MailService {
       AnalysisFailureType.quotaExhausted.name,
     ]);
     // 分析期间这封邮件已经不是待分析了：不重复生成事项。
-    if (updated == 0 || !result.category.producesCandidates) return;
-    for (final item in result.items) {
+    if (updated == 0) return;
+    final List<AnalyzedItem> analyzed;
+    if (mail.markedUseful) {
+      analyzed = result.items.isNotEmpty ? result.items : [_subjectItem(mail)];
+    } else if (result.category.producesCandidates) {
+      analyzed = result.items;
+    } else {
+      return;
+    }
+    for (final item in analyzed) {
       final event = cardTimeToColumns(item.eventTime);
       final due = cardTimeToColumns(item.dueTime);
       await _db
@@ -1105,6 +1154,20 @@ class MailService {
           );
     }
   }
+
+  /// 点了 [这封有用]、又分析不出事项时，以邮件主题为标题的那个事项。
+  AnalyzedItem _subjectItem(MailRow mail) => AnalyzedItem(
+    updates: null,
+    title: _preview(mail).displaySubject,
+    summary: null,
+    actions: const [],
+    location: null,
+    linkRefs: const [],
+    eventTime: null,
+    dueTime: null,
+    optional: false,
+    unanalyzedAttachments: false,
+  );
 
   // ---- 候选事项、加入和忽略 ----
 
@@ -1159,6 +1222,85 @@ class MailService {
     });
   }
 
+  /// "已过滤的邮件"：分类为仅供参考或低价值的邮件（点了 [这封有用] 的除外）、
+  /// 首次设置时较早没分析的邮件、分析失败的邮件和被忽略的事项，收件
+  /// 时间新的在前（spec 0002"候选事项、加入和忽略"）。邮件或事项变了时
+  /// 重新发出。
+  Stream<List<FilteredEntry>> watchFiltered() =>
+      _watchTables([_db.mails, _db.mailItems], () => _read(_filtered));
+
+  Future<List<FilteredEntry>> _filtered() async {
+    final mails = _db.mails;
+    final items = _db.mailItems;
+    final filteredMails =
+        await (_db.select(mails)..where(
+              (m) =>
+                  (m.analysisStatus.equalsValue(MailAnalysisStatus.done) &
+                      m.markedUseful.not() &
+                      m.category.isIn([
+                        MailCategory.informational.name,
+                        MailCategory.lowValue.name,
+                      ])) |
+                  m.analysisStatus.isInValues([
+                    MailAnalysisStatus.deferredOld,
+                    MailAnalysisStatus.failed,
+                  ]),
+            ))
+            .get();
+    final ignored = await (_db.select(items).join([
+      innerJoin(mails, mails.id.equalsExp(items.mailId)),
+    ])..where(items.status.equalsValue(MailItemStatus.ignored))).get();
+    final entries = [
+      for (final mail in filteredMails) _filteredMail(mail),
+      for (final row in ignored)
+        FilteredEntry(
+          kind: FilteredKind.ignoredItem,
+          id: row.readTable(items).id,
+          title: row.readTable(items).title,
+          mailId: row.readTable(mails).id,
+          sender: _preview(row.readTable(mails)).displaySender,
+          receivedAt: _fromMillis(row.readTable(mails).receivedAt),
+          reason: '你忽略了这个事项',
+          bodyCleared: row.readTable(mails).bodyClearedAt != null,
+        ),
+    ];
+    entries.sort((a, b) {
+      final byTime = switch ((a.receivedAt, b.receivedAt)) {
+        (final x?, final y?) => y.compareTo(x),
+        (_?, null) => -1,
+        (null, _?) => 1,
+        (null, null) => 0,
+      };
+      return byTime != 0 ? byTime : a.id.compareTo(b.id);
+    });
+    return entries;
+  }
+
+  FilteredEntry _filteredMail(MailRow mail) {
+    final (kind, reason) = switch (mail.analysisStatus) {
+      MailAnalysisStatus.deferredOld => (
+        FilteredKind.notAnalyzed,
+        '较早的邮件，没有自动分析',
+      ),
+      MailAnalysisStatus.failed => (FilteredKind.analysisFailed, '分析失败'),
+      _ when mail.category == MailCategory.lowValue.name => (
+        FilteredKind.lowValue,
+        mail.categoryReason ?? '',
+      ),
+      _ => (FilteredKind.informational, mail.categoryReason ?? ''),
+    };
+    return FilteredEntry(
+      kind: kind,
+      id: mail.id,
+      title: _preview(mail).displaySubject,
+      mailId: mail.id,
+      sender: _preview(mail).displaySender,
+      receivedAt: _fromMillis(mail.receivedAt),
+      reason: reason,
+      bodyCleared: mail.bodyClearedAt != null,
+    );
+  }
+
   /// 排序用的时间：截止时间，没有时用活动时间；只有日期时取那天 0 点。
   static DateTime? _sortTime(MailItemRow item) {
     final time = _itemDueTime(item) ?? _itemEventTime(item);
@@ -1207,6 +1349,23 @@ class MailService {
     await (_db.update(_db.mailItems)..where((i) => i.id.equals(itemId))).write(
       MailItemsCompanion(
         status: const Value(MailItemStatus.ignored),
+        updatedAt: Value(_nowMillis),
+      ),
+    );
+  });
+
+  /// [恢复]：被忽略的事项回到栏里。事项不是被忽略的时抛出 [InvalidState]。
+  Future<void> restoreItem(String itemId) => _write(() async {
+    final item = await (_db.select(
+      _db.mailItems,
+    )..where((i) => i.id.equals(itemId))).getSingleOrNull();
+    if (item == null) throw NotFound('找不到事项 $itemId');
+    if (item.status != MailItemStatus.ignored) {
+      throw const InvalidState('这个事项没有被忽略');
+    }
+    await (_db.update(_db.mailItems)..where((i) => i.id.equals(itemId))).write(
+      MailItemsCompanion(
+        status: const Value(MailItemStatus.candidate),
         updatedAt: Value(_nowMillis),
       ),
     );

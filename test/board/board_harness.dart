@@ -155,6 +155,26 @@ class BoardHarness {
     });
   }
 
+  /// 直接改数据库，清除所有邮件的正文和链接，模拟正文到期后被清除。
+  Future<void> clearMailBodies(WidgetTester tester) async {
+    await tester.runAsync(() async {
+      final database = _newConnection();
+      try {
+        await database
+            .update(database.mails)
+            .write(
+              MailsCompanion(
+                bodyText: const Value(null),
+                links: const Value(null),
+                bodyClearedAt: Value(now.toUtc().millisecondsSinceEpoch),
+              ),
+            );
+      } finally {
+        await database.close();
+      }
+    });
+  }
+
   /// 直接改数据库，把卡片挪到 [dayKey] 那一天。正常操作造不出两端不在同一天的
   /// 连线，用它来模拟。
   Future<void> moveCardToDay(

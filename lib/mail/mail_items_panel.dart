@@ -7,6 +7,7 @@ import '../board/read_failure_view.dart';
 import '../formatting/date_format.dart';
 import '../planner/day_key.dart';
 import '../planner/planner_exceptions.dart';
+import 'filtered_mails_page.dart';
 import 'mail_detail_page.dart';
 import 'mail_import_status_line.dart';
 import 'mail_items.dart';
@@ -15,7 +16,7 @@ import 'mail_service.dart';
 /// "新邮件事项"栏的宽度（宽屏时在画布右边），连同四周的留白。
 const mailItemsPanelWidth = 336.0;
 
-/// "新邮件事项"栏的内容：标题和候选事项。每条候选可以 [加入]（默认今天，
+/// "新邮件事项"栏的内容：标题、状态行、候选事项，底部是"已过滤的邮件 (N)"。每条候选可以 [加入]（默认今天，
 /// "改日期"可以选今天或以后）或 [忽略]。宽屏时放在画布右边的面板里，窄屏
 /// 时放在底部面板里，内容一样。
 class MailItemsPanel extends ConsumerWidget {
@@ -97,7 +98,29 @@ class MailItemsPanel extends ConsumerWidget {
             _ => const SizedBox.shrink(),
           },
         ),
+        const _FilteredMailsButton(),
       ],
+    );
+  }
+}
+
+/// 栏底部的"已过滤的邮件 (N)"，打开已过滤的邮件。读不出来时不显示数字。
+class _FilteredMailsButton extends ConsumerWidget {
+  const _FilteredMailsButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final count = ref.watch(mailFilteredProvider).value?.length;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: PlannerTheme.space2),
+      child: Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: TextButton.icon(
+          onPressed: () => FilteredMailsPage.open(Navigator.of(context)),
+          icon: const Icon(Icons.filter_list, size: 18),
+          label: Text(count == null ? '已过滤的邮件' : '已过滤的邮件 ($count)'),
+        ),
+      ),
     );
   }
 }

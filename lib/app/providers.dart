@@ -198,6 +198,16 @@ final mailCandidatesProvider = StreamProvider<List<MailItemCandidate>>(
   retry: (_, _) => null,
 );
 
+/// "已过滤的邮件"，给栏底部的入口和列表页用。读取失败时是错误状态。
+final mailFilteredProvider = StreamProvider<List<FilteredEntry>>(
+  (ref) async* {
+    final service = await ref.watch(mailServiceProvider.future);
+    yield* service.watchFiltered();
+  },
+  // 不自动重试：读不出来时停在提示上，由用户点「重试」。
+  retry: (_, _) => null,
+);
+
 /// 由邮件事项加入的卡片的 id，给卡片上的信封图标用。读不出来时不显示图标。
 final mailCardIdsProvider = StreamProvider<Set<String>>((ref) async* {
   final service = await ref.watch(mailServiceProvider.future);
