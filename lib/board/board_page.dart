@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/providers.dart';
 import '../formatting/date_format.dart';
+import '../mail/mail_preview_page.dart';
 import '../planner/day_key.dart';
 import '../planner/planner_exceptions.dart';
+import '../settings/settings_page.dart';
 import 'board_canvas.dart';
 import 'board_layout.dart';
 import 'board_selection.dart';
@@ -34,6 +36,12 @@ class BoardPage extends ConsumerStatefulWidget {
 
   /// 标题栏上打开回收站的按钮的 key。
   static const trashButtonKey = ValueKey('trash-button');
+
+  /// 标题栏上打开邮件预览的按钮的 key（只在 Windows 上有）。
+  static const mailButtonKey = ValueKey('mail-button');
+
+  /// 标题栏上打开设置页的按钮的 key（只在 Windows 上有：设置页现在只有邮件）。
+  static const settingsButtonKey = ValueKey('settings-button');
 
   @override
   ConsumerState<BoardPage> createState() => _BoardPageState();
@@ -132,6 +140,20 @@ class _BoardPageState extends ConsumerState<BoardPage> {
           onPressed: () => _leaveBoardTo(TrashPage.open),
           icon: const Icon(Icons.delete_outline),
         ),
+        if (mailAvailable) ...[
+          IconButton(
+            key: BoardPage.mailButtonKey,
+            tooltip: '邮件',
+            onPressed: () => _leaveBoardTo(MailPreviewPage.open),
+            icon: const Icon(Icons.mail_outline),
+          ),
+          IconButton(
+            key: BoardPage.settingsButtonKey,
+            tooltip: '设置',
+            onPressed: () => _leaveBoardTo(SettingsPage.open),
+            icon: const Icon(Icons.settings_outlined),
+          ),
+        ],
       ],
     );
     Widget shell({
@@ -185,7 +207,7 @@ class _BoardPageState extends ConsumerState<BoardPage> {
     switchDay(context, ref, (s) => s.showDay(day));
   }
 
-  /// 从画布打开别的页面（已完成列表、回收站）：先保存正在编辑的内容，保存
+  /// 从画布打开别的页面（已完成列表、回收站、邮件、设置）：先保存正在编辑的内容，保存
   /// 失败时提示，不打开。
   Future<void> _leaveBoardTo(
     Future<void> Function(NavigatorState navigator) open,

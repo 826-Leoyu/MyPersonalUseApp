@@ -1,4 +1,5 @@
-// 数据库迁移（M-1）：用 v1 的数据库升级，旧数据通过 PlannerService 读回来都一样。
+// 数据库迁移（M-1）：用 v1、v2 的数据库升级，旧数据通过 PlannerService 读回来
+// 都一样。
 //
 // generated_migrations/ 和 drift_schemas/ 由 drift_dev 生成。改了表结构、
 // 升了 schemaVersion 以后重新生成：
@@ -27,15 +28,17 @@ void main() {
   int millis(DateTime time) => time.toUtc().millisecondsSinceEpoch;
   final created = millis(now.subtract(const Duration(days: 2)));
 
-  test('结构从 v1 升级到 v2 后和新建的 v2 数据库一样', () async {
-    final schema = await verifier.schemaAt(1);
-    final db = PlannerDatabase(schema.newConnection());
+  for (final from in [1, 2]) {
+    test('结构从 v$from 升级到 v3 后和新建的 v3 数据库一样', () async {
+      final schema = await verifier.schemaAt(from);
+      final db = PlannerDatabase(schema.newConnection());
 
-    await verifier.migrateAndValidate(db, 2);
-    await db.close();
-  });
+      await verifier.migrateAndValidate(db, 3);
+      await db.close();
+    });
+  }
 
-  test('从 v1 升级到 v2 后，卡片、连线、历史记录、回收站和 AppMeta 都和升级前一样', () async {
+  test('从 v1 升级到最新版后，卡片、连线、历史记录、回收站和 AppMeta 都和升级前一样', () async {
     final schema = await verifier.schemaAt(1);
     // 用 v1 的表结构直接写入旧数据。
     final v1 = schema.rawDatabase;
@@ -161,7 +164,7 @@ void main() {
     final version = await (db.select(
       db.appMeta,
     )..where((m) => m.key.equals('schemaVersion'))).getSingle();
-    expect(version.value, '2');
+    expect(version.value, '${db.schemaVersion}');
 
     // 升级后的旧卡片可以设时间。
     await service.updateCardContent(
@@ -174,6 +177,39 @@ void main() {
       (c) => c.id == 'plain',
     );
     expect(plain.dueTime, CardTime.date(today.addDays(3)));
+
+    await db.close();
+  });
+
+  test('从 v2 升级到 v3 后，卡片的时间和 AppMeta 都和升级前一样', () async {
+    final schema = await verifier.schemaAt(2);
+    final v2 = schema.rawDatabase;
+    v2.execute(
+      'INSERT INTO task_cards (id, day_key, title, x, y, width, height, '
+      'z_index, color_argb, status, carried_over, original_day_key, '
+      'created_at, updated_at, event_time, event_time_precision, '
+      'event_time_pending, due_time, due_time_precision, due_time_pending) '
+      "VALUES ('timed', ?, '有时间', 0, 0, 180, 88, 1, ?, 'active', 0, ?, ?, ?, "
+      "'2026-10-21T13:00:00.000Z', 'dateTime', 0, ?, 'date', 1)",
+      ['$today', 0xFFCDEBC5, '$today', created, created, '${today.addDays(5)}'],
+    );
+    v2.execute(
+      "INSERT INTO app_meta (key, value) VALUES ('schemaVersion', '2'), "
+      "('lastMaintenanceDay', '$today')",
+    );
+
+    final db = PlannerDatabase(schema.newConnection());
+    final service = PlannerService(database: db, clock: Clock(() => now));
+    await service.open();
+
+    final card = (await service.watchDay(today).first).cards.single;
+    expect(card.eventTime, CardTime.dateTime(DateTime.utc(2026, 10, 21, 13)));
+    expect(card.dueTime, CardTime.date(today.addDays(5), pending: true));
+    final meta = await db.select(db.appMeta).get();
+    expect(
+      {for (final m in meta) m.key: m.value},
+      {'schemaVersion': '3', 'lastMaintenanceDay': '$today'},
+    );
 
     await db.close();
   });

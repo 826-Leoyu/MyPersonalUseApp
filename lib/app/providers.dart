@@ -2,7 +2,12 @@
 library;
 
 import 'package:clock/clock.dart';
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../mail/mail_preview.dart';
+import '../mail/mail_service.dart';
 
 import '../planner/day_board.dart';
 import '../planner/day_counts.dart';
@@ -101,4 +106,45 @@ final trashProvider = StreamProvider.autoDispose<List<TrashedCard>>(
   },
   // 不自动重试：读不出来时停在提示上，由用户点「重试」。
   retry: (_, _) => null,
+);
+
+/// 邮件功能只在 Windows 上有（spec 0002"平台"）；其他平台看不到任何入口。
+bool get mailAvailable => defaultTargetPlatform == TargetPlatform.windows;
+
+/// 打开好的 [MailService]，和 [PlannerService] 共用同一个数据库。
+final mailServiceProvider = FutureProvider<MailService>((ref) async {
+  final planner = await ref.watch(plannerServiceProvider.future);
+  return MailService(
+    database: planner.database,
+    clock: ref.watch(clockProvider),
+  );
+}, retry: (_, _) => null);
+
+/// 已导入的邮件，给邮件预览列表用。读取失败时是错误状态。
+final mailPreviewsProvider = StreamProvider.autoDispose<List<MailPreview>>(
+  (ref) async* {
+    final service = await ref.watch(mailServiceProvider.future);
+    yield* service.watchMails();
+  },
+  // 不自动重试：读不出来时停在提示上，由用户点「重试」。
+  retry: (_, _) => null,
+);
+
+/// 设置里的邮箱地址，没有填写时为 null。修改以后 invalidate 它。
+final mailboxAddressProvider = FutureProvider.autoDispose<String?>((ref) async {
+  final service = await ref.watch(mailServiceProvider.future);
+  return service.mailboxAddress();
+}, retry: (_, _) => null);
+
+/// 让用户选择一个导出文件，返回它的路径；取消时为 null。测试里换成直接
+/// 返回临时目录里的文件。
+final pickMailExportFileProvider = Provider<Future<String?> Function()>(
+  (ref) => () async {
+    final file = await openFile(
+      acceptedTypeGroups: const [
+        XTypeGroup(label: 'JSON', extensions: ['json']),
+      ],
+    );
+    return file?.path;
+  },
 );
