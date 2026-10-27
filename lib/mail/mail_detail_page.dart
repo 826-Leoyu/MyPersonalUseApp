@@ -25,9 +25,7 @@ class MailDetailPage extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text(switch (detail) {
-          AsyncData(value: final d?) when d.preview.subject.isNotEmpty =>
-            d.preview.subject,
-          AsyncData(value: _?) => '（无主题）',
+          AsyncData(value: final d?) => d.preview.displaySubject,
           _ => '',
         }),
       ),
@@ -52,35 +50,35 @@ class _MailDetailView extends StatelessWidget {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final preview = detail.preview;
+    final body = detail.body;
     final received = preview.receivedAt;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         Text(
           [
-            preview.senderName ?? preview.senderAddress ?? '（未知发件人）',
+            preview.displaySender,
             if (received != null) formatReceivedTime(received),
           ].join(' · '),
           style: textTheme.bodyMedium,
         ),
-        if (detail.bodyPossiblyIncomplete || detail.hasInlineImages) ...[
+        if (body.possiblyIncomplete || body.hasInlineImages) ...[
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
             children: [
-              if (detail.bodyPossiblyIncomplete)
-                const Chip(label: Text('正文可能不完整')),
-              if (detail.hasInlineImages) const Chip(label: Text('有内嵌图片')),
+              if (body.possiblyIncomplete) const Chip(label: Text('正文可能不完整')),
+              if (body.hasInlineImages) const Chip(label: Text('有内嵌图片')),
             ],
           ),
         ],
         const Divider(height: 32),
-        SelectableText(detail.bodyText ?? '（没有正文）'),
-        if (detail.links.isNotEmpty) ...[
+        SelectableText(body.text ?? '（没有正文）'),
+        if (body.links.isNotEmpty) ...[
           const Divider(height: 32),
           Text('链接', style: textTheme.titleSmall),
           const SizedBox(height: 8),
-          for (final (index, url) in detail.links.indexed)
+          for (final (index, url) in body.links.indexed)
             SelectableText('[${index + 1}] $url'),
         ],
       ],

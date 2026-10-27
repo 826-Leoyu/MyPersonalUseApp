@@ -118,19 +118,18 @@ class _MailTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sender = mail.senderName ?? mail.senderAddress ?? '（未知发件人）';
     final received = mail.receivedAt;
     return ListTile(
       key: MailPreviewPage.itemKey(mail.id),
       onTap: () => MailDetailPage.open(Navigator.of(context), mail.id),
       title: Text(
-        mail.subject.isEmpty ? '（无主题）' : mail.subject,
+        mail.displaySubject,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
       subtitle: Text(
         [
-          sender,
+          mail.displaySender,
           if (received != null) formatReceivedTime(received),
         ].join(' · '),
         maxLines: 1,

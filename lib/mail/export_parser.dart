@@ -74,7 +74,6 @@ class ExportedMail {
     required this.importance,
     required this.hasAttachments,
     required this.body,
-    required this.hasInlineImages,
   });
 
   /// 邮件键：`internetMessageId`，没有时用 `id`。
@@ -91,11 +90,8 @@ class ExportedMail {
   final String? importance;
   final bool hasAttachments;
 
-  /// 转换后的正文，见 [mailBodyText]。
+  /// 转换后的正文，见 [convertMailBody]。
   final MailBody body;
-
-  /// 正文里有内嵌图片，或者有内嵌的图片附件。
-  final bool hasInlineImages;
 }
 
 /// 邮箱地址的规范形式：去掉首尾空白，转成小写。
@@ -175,10 +171,11 @@ ExportedMail? _mail(Map<String, Object?> m) {
     ),
     _ => ('', false),
   };
-  final body = mailBodyText(
+  final body = convertMailBody(
     body: content,
     isHtml: isHtml,
     bodyPreview: _text(m['bodyPreview']),
+    hasInlineImageAttachment: _hasInlineImageAttachment(m),
   );
   return ExportedMail(
     key: key,
@@ -192,7 +189,6 @@ ExportedMail? _mail(Map<String, Object?> m) {
     importance: _text(m['importance']),
     hasAttachments: m['hasAttachments'] == true,
     body: body,
-    hasInlineImages: body.hasInlineImages || _hasInlineImageAttachment(m),
   );
 }
 

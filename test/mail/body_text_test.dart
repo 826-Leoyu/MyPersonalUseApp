@@ -4,7 +4,7 @@ import 'package:my_personal_use_app/mail/body_text.dart';
 
 void main() {
   MailBody html(String body, {String? bodyPreview}) =>
-      mailBodyText(body: body, isHtml: true, bodyPreview: bodyPreview);
+      convertMailBody(body: body, isHtml: true, bodyPreview: bodyPreview);
 
   test('英文段落转成文本，链接文字后面加编号，链接存进列表', () {
     final body = html(
@@ -220,6 +220,16 @@ void main() {
       );
     });
 
+    test('空的签名和引用不写标记', () {
+      final body = html(
+        '<p>Thanks.</p>'
+        '<div id="Signature"><div>&nbsp;</div></div>'
+        '<blockquote></blockquote>',
+      );
+
+      expect(body.text, 'Thanks.');
+    });
+
     test('认不出来的签名照常保留，不加标记', () {
       final body = html('<p>Thanks for your help.</p><p>Best,<br>Sam</p>');
 
@@ -238,6 +248,16 @@ void main() {
       expect(body.text, '[图片: 秋季招聘会海报]\n[图片]');
       expect(body.hasInlineImages, isTrue);
       expect(body.possiblyIncomplete, isFalse);
+    });
+
+    test('只有 1×1 的图片算跟踪像素，带 px 和写在 style 里的也算', () {
+      final body = html(
+        '<img src="https://example.com/line.png" width="1" height="600">'
+        '<img src="https://t.example.com/a.gif" width="1px" height="1px">'
+        '<img src="https://t.example.com/b.gif" style="width:1px; height: 1px">',
+      );
+
+      expect(body.text, '[图片]');
     });
 
     test('网上的图片写成图片标记，不算内嵌图片', () {
@@ -268,6 +288,25 @@ void main() {
       expect(body.possiblyIncomplete, isTrue);
     });
 
+    test('bodyPreview 里的网址也编号', () {
+      final body = html('', bodyPreview: 'Form: https://example.com/form');
+
+      expect(body.text, 'Form: https://example.com/form [1]');
+      expect(body.links, ['https://example.com/form']);
+      expect(body.possiblyIncomplete, isTrue);
+    });
+
+    test('只有空签名和跟踪像素时也用 bodyPreview', () {
+      final body = html(
+        '<img src="https://t.example.com/o.gif" width="1" height="1">'
+        '<div id="Signature"></div>',
+        bodyPreview: '图书馆周六闭馆',
+      );
+
+      expect(body.text, '图书馆周六闭馆');
+      expect(body.possiblyIncomplete, isTrue);
+    });
+
     test('body 和 bodyPreview 都没有时正文为空', () {
       final body = html('', bodyPreview: null);
 
@@ -279,7 +318,7 @@ void main() {
 
   group('纯文本正文', () {
     MailBody plain(String body) =>
-        mailBodyText(body: body, isHtml: false, bodyPreview: null);
+        convertMailBody(body: body, isHtml: false, bodyPreview: null);
 
     test('保留换行，网址后面加编号，标出签名和引用', () {
       final body = plain(
@@ -320,6 +359,23 @@ void main() {
         'https://example.com/form',
         'https://example.com/rules',
       ]);
+    });
+
+    test('网址后面紧跟的中文不算网址', () {
+      final body = plain(
+        '详见https://example.com/x，请周五前提交。\n报名https://example.com/y请回复',
+      );
+
+      expect(
+        body.text,
+        '详见https://example.com/x [1]，请周五前提交。\n'
+        '报名https://example.com/y [2]请回复',
+      );
+      expect(body.links, ['https://example.com/x', 'https://example.com/y']);
+    });
+
+    test('签名分隔行后面什么都没有时不写标记', () {
+      expect(plain('Thanks.\n-- \n').text, 'Thanks.');
     });
 
     test('Outlook 纯文本回复的下划线分隔线后面算引用', () {

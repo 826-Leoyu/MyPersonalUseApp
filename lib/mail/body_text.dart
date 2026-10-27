@@ -22,37 +22,43 @@ class MailBody {
 
   /// 正文里的链接，第 n 个对应文本里的 `[n]`。
   final List<String> links;
+
+  /// 正文里有内嵌图片，或者有内嵌的图片附件。
   final bool hasInlineImages;
 
   /// `body` 转不出内容、用了 `bodyPreview` 时为 true。
   final bool possiblyIncomplete;
 }
 
-/// 把导出文件里的 `body` 转成 [MailBody]。转不出任何内容时用 [bodyPreview]。
-MailBody mailBodyText({
+/// 把导出文件里的 `body` 转成 [MailBody]。转不出任何内容时用 [bodyPreview]，
+/// 按纯文本处理。[hasInlineImageAttachment]：`attachments` 里有内嵌的图片附件。
+MailBody convertMailBody({
   required String body,
   required bool isHtml,
   String? bodyPreview,
+  bool hasInlineImageAttachment = false,
 }) {
   final converted = isHtml ? _fromHtml(body) : _fromPlainText(body);
-  final preview = bodyPreview?.trim() ?? '';
-  if (converted.text != null || preview.isEmpty) return converted;
+  final preview = _fromPlainText(bodyPreview ?? '');
+  final usePreview = converted.text == null && preview.text != null;
+  final (:text, :links, inlineImages: _) = usePreview ? preview : converted;
   return MailBody(
-    text: preview,
-    links: const [],
-    hasInlineImages: converted.hasInlineImages,
-    possiblyIncomplete: true,
+    text: text,
+    links: links,
+    hasInlineImages: converted.inlineImages || hasInlineImageAttachment,
+    possiblyIncomplete: usePreview,
   );
 }
 
-MailBody _fromHtml(String body) {
+typedef _Converted = ({String? text, List<String> links, bool inlineImages});
+
+_Converted _fromHtml(String body) {
   final writer = _Writer();
   _Converter(writer).convert(html.parse(body).body!);
-  return MailBody(
+  return (
     text: writer.result,
     links: writer.links,
-    hasInlineImages: writer.hasInlineImages,
-    possiblyIncomplete: false,
+    inlineImages: writer.hasInlineImages,
   );
 }
 
@@ -64,10 +70,27 @@ final _plainQuoteStart = RegExp(
   caseSensitive: false,
 );
 
-/// 纯文本里的网址。
-final _url = RegExp(r'https?://[^\s<>"]+');
+/// 纯文本里的网址：遇到空白、中文或全角标点就结束，中文邮件里网址后面常常
+/// 不空格。
+final _plainUrl = RegExp(
+  r'https?://[^\s<>"\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]+',
+);
 
-MailBody _fromPlainText(String body) {
+/// 纯文本正文里什么都没包住的一对标记。
+final _emptyMarked = RegExp(
+  [
+    for (final (start, end) in _markers)
+      '${RegExp.escape(start)}\n*${RegExp.escape(end)}',
+  ].join('|'),
+);
+final _blankAfterStart = RegExp(
+  '(${_markers.map((m) => RegExp.escape(m.$1)).join('|')})\n+',
+);
+final _blankBeforeEnd = RegExp(
+  '\n\n+(?=${_markers.map((m) => RegExp.escape(m.$2)).join('|')})',
+);
+
+_Converted _fromPlainText(String body) {
   final links = <String>[];
   final lines = <String>[];
   // 正在标记的引用或签名的结束标记。
@@ -93,26 +116,22 @@ MailBody _fromPlainText(String body) {
       continue;
     }
     lines.add(
-      line.replaceAllMapped(_url, (m) {
+      line.replaceAllMapped(_plainUrl, (m) {
         final (url, rest) = _trimUrl(m[0]!);
-        return '$url [${_number(links, url)}]$rest';
+        return '$url [${_linkNumber(links, url)}]$rest';
       }),
     );
   }
   if (openEnd case final end?) close(end);
   final text = lines
       .join('\n')
+      .replaceAll(_emptyMarked, '')
       // 标记里面紧挨着标记的空行不要。
-      .replaceAllMapped(RegExp(r'(\[(?:引用|签名)\])\n+'), (m) => '${m[1]}\n')
-      .replaceAll(RegExp(r'\n\n+(?=\[/(?:引用|签名)\])'), '\n')
+      .replaceAllMapped(_blankAfterStart, (m) => '${m[1]}\n')
+      .replaceAll(_blankBeforeEnd, '\n')
       .replaceAll(RegExp(r'\n{3,}'), '\n\n')
       .trim();
-  return MailBody(
-    text: text.isEmpty ? null : text,
-    links: links,
-    hasInlineImages: false,
-    possiblyIncomplete: false,
-  );
+  return (text: text.isEmpty ? null : text, links: links, inlineImages: false);
 }
 
 /// 网址末尾的标点不算网址：返回网址和去掉的标点。
@@ -121,14 +140,14 @@ MailBody _fromPlainText(String body) {
   while (end > 0) {
     final c = url[end - 1];
     final unmatchedParen = c == ')' && !url.substring(0, end).contains('(');
-    if (!'.,;:!?。，；：！？'.contains(c) && !unmatchedParen) break;
+    if (!'.,;:!?'.contains(c) && !unmatchedParen) break;
     end--;
   }
   return (url.substring(0, end), url.substring(end));
 }
 
 /// 链接的编号，从 1 开始；同一个链接用同一个编号。
-int _number(List<String> links, String url) {
+int _linkNumber(List<String> links, String url) {
   final index = links.indexOf(url);
   if (index >= 0) return index + 1;
   links.add(url);
@@ -156,22 +175,37 @@ const _quoteStart = '[引用]';
 const _quoteEnd = '[/引用]';
 const _signatureStart = '[签名]';
 const _signatureEnd = '[/签名]';
+const _markers = [(_quoteStart, _quoteEnd), (_signatureStart, _signatureEnd)];
 
 /// 去掉 Outlook 转发时加在 id 前面的 `x_`。
-String _id(Element e) => e.id.replaceFirst(RegExp('^x_'), '');
+String _outlookId(Element e) => e.id.replaceFirst(RegExp('^x_'), '');
 
 /// Outlook 的签名 id 以 Signature 开头；Gmail 用 `gmail_signature`。
 bool _isSignature(Element e) =>
-    RegExp('^signature', caseSensitive: false).hasMatch(_id(e)) ||
+    RegExp('^signature', caseSensitive: false).hasMatch(_outlookId(e)) ||
     e.classes.contains('gmail_signature');
 
-/// 宽或高不超过 1 像素的图片，是用来统计打开次数的，不是内容。
-bool _isTrackingPixel(Element img) => ['width', 'height'].any(
-  (side) => switch (int.tryParse(img.attributes[side] ?? '')) {
-    final size? => size <= 1,
-    null => false,
-  },
-);
+/// 1×1 的跟踪像素，是用来统计打开次数的，不是内容。只写了宽或高时看写了的
+/// 那一边。
+bool _isTrackingPixel(Element img) {
+  final sizes = [_pixels(img, 'width'), _pixels(img, 'height')];
+  return sizes.any((size) => size != null) &&
+      sizes.every((size) => size == null || size <= 1);
+}
+
+/// 图片的宽或高（像素），先看 `style`，再看属性；没写时为 null。
+int? _pixels(Element img, String side) {
+  final fromStyle = RegExp(
+    '(?:^|;)\\s*$side\\s*:\\s*(\\d+)\\s*(?:px)?\\s*(?:;|\$)',
+    caseSensitive: false,
+  ).firstMatch(img.attributes['style'] ?? '');
+  final fromAttribute = RegExp(r'^\s*(\d+)\s*(?:px)?\s*$')
+      .firstMatch(img.attributes[side] ?? '');
+  return switch ((fromStyle ?? fromAttribute)?[1]) {
+    final digits? => int.parse(digits),
+    null => null,
+  };
+}
 
 /// 整个元素是引用的旧邮件。
 bool _isQuote(Element e) =>
@@ -184,7 +218,7 @@ bool _startsTailQuote(Element e) {
     'appendonsend',
     'divRplyFwdMsg',
     'mail-editor-reference-message-container',
-  }.contains(_id(e))) {
+  }.contains(_outlookId(e))) {
     return true;
   }
   // 经典版 Outlook：顶部有边框的 div，里面是"From: …"开头的旧邮件信息。
@@ -199,36 +233,40 @@ class _Converter {
 
   final _Writer _out;
 
+  /// 正在处理的列表，最里层的在最后：有序列表记下已经编到第几项，无序列表
+  /// 记 null。
+  final _lists = <int?>[];
+
   /// 在引用的旧邮件或签名里面：里面的引用和签名不再另加标记。
-  bool _inQuote = false;
+  bool _inMarked = false;
 
   /// 遇到了 [_startsTailQuote]，后面直到结尾都是引用。
   bool _inTailQuote = false;
 
   void convert(Element body) {
-    node(body);
+    _node(body);
     if (_inTailQuote) _out.closeMarker(_quoteEnd);
   }
 
-  void node(Node node) {
+  void _node(Node node) {
     switch (node) {
       case Text(:final data):
         _out.write(data);
       case Element(localName: final name) when _skippedTags.contains(name):
         break;
-      case Element() when !_inQuote && _startsTailQuote(node):
+      case Element() when !_inMarked && _startsTailQuote(node):
         _out.openMarker(_quoteStart);
-        _inQuote = _inTailQuote = true;
-        this.node(node);
-      case Element() when !_inQuote && _isQuote(node):
+        _inMarked = _inTailQuote = true;
+        _node(node);
+      case Element() when !_inMarked && _isQuote(node):
         _marked(node, _quoteStart, _quoteEnd);
-      case Element() when !_inQuote && _isSignature(node):
+      case Element() when !_inMarked && _isSignature(node):
         _marked(node, _signatureStart, _signatureEnd);
       case Element(localName: 'a'):
-        children(node);
+        _children(node);
         final href = node.attributes['href']?.trim() ?? '';
         if (RegExp('^https?://', caseSensitive: false).hasMatch(href)) {
-          _out.write(' [${_out.link(href)}]');
+          _out.write(' [${_linkNumber(_out.links, href)}]');
         }
       case Element(localName: 'img') when !_isTrackingPixel(node):
         final src = (node.attributes['src'] ?? '').trim().toLowerCase();
@@ -241,52 +279,48 @@ class _Converter {
         });
       case Element(localName: 'td' || 'th'):
         if (node.previousElementSibling != null) _out.write(' | ');
-        children(node);
+        _children(node);
       case Element(localName: 'br'):
         _out.lineBreak();
       case Element(localName: 'li'):
         _out.newLine();
         final depth = _lists.length;
         final marker = switch (_lists.lastOrNull) {
-          final ordered? when ordered >= 0 => '${_lists.last = ordered + 1}.',
-          _ => '-',
+          final ordered? => '${_lists.last = ordered + 1}.',
+          null => '-',
         };
-        _out.prefix('${'  ' * max(depth - 1, 0)}$marker ');
-        children(node);
+        _out.writeRaw('${'  ' * max(depth - 1, 0)}$marker ');
+        _children(node);
         _out.newLine();
       case Element(localName: final name) when _listTags.contains(name):
-        // 有序列表记下已经编到第几项，无序列表记 -1。
-        _lists.add(name == 'ol' ? 0 : -1);
+        _lists.add(name == 'ol' ? 0 : null);
         _lists.length == 1 ? _out.blankLine() : _out.newLine();
-        children(node);
+        _children(node);
         _lists.removeLast();
         _lists.isEmpty ? _out.blankLine() : _out.newLine();
       case Element(localName: final name) when _paragraphTags.contains(name):
         _out.blankLine();
-        children(node);
+        _children(node);
         _out.blankLine();
       case Element(localName: final name) when _lineTags.contains(name):
         _out.newLine();
-        children(node);
+        _children(node);
         _out.newLine();
       case Element():
-        children(node);
+        _children(node);
     }
   }
 
   /// 用 [start] 和 [end] 把 [element] 包起来。
   void _marked(Element element, String start, String end) {
     _out.openMarker(start);
-    _inQuote = true;
-    children(element);
-    _inQuote = false;
+    _inMarked = true;
+    _children(element);
+    _inMarked = false;
     _out.closeMarker(end);
   }
 
-  /// 正在处理的列表，最里层的在最后。
-  final _lists = <int>[];
-
-  void children(Node node) => node.nodes.forEach(this.node);
+  void _children(Node node) => node.nodes.forEach(_node);
 }
 
 /// 拼接文本：连续空白合成一个空格，块之间换行。
@@ -298,6 +332,9 @@ class _Writer {
   /// 下一段文字前要换几行：0 不换行，1 换一行，2 空一行。
   int _pendingBreak = 0;
   bool _pendingSpace = false;
+
+  /// 还没写出的开始标记：等到里面真有文字时才写，什么都没包住就不写。
+  String? _pendingMarker;
 
   void write(String text) {
     final words = text.split(RegExp(r'\s+'));
@@ -313,11 +350,19 @@ class _Writer {
     if (words.length > 1 && words.last.isEmpty) _pendingSpace = true;
   }
 
+  /// 写出等着的开始标记和换行，准备写下一段文字。
   void _flush() {
-    if (_afterMarker) {
+    if (_pendingMarker case final marker?) {
+      _pendingMarker = null;
+      _writeBreak();
+      _buffer.write(marker);
+      // 标记后面的文字只换一行，不空行。
       _pendingBreak = 1;
-      _afterMarker = false;
     }
+    _writeBreak();
+  }
+
+  void _writeBreak() {
     if (_buffer.isNotEmpty) {
       if (_pendingBreak > 0) {
         _buffer.write('\n' * _pendingBreak);
@@ -341,28 +386,26 @@ class _Writer {
   /// 标记单独占一行，前面空一行。
   void openMarker(String marker) {
     blankLine();
-    prefix(marker);
-    _afterMarker = true;
+    _pendingMarker = marker;
   }
 
-  /// 标记单独占一行，后面空一行。
+  /// 标记单独占一行，后面空一行。开始标记还没写出（里面什么都没有）时，
+  /// 两个都不写。
   void closeMarker(String marker) {
+    if (_pendingMarker != null) {
+      _pendingMarker = null;
+      return;
+    }
     _pendingBreak = 1;
-    prefix(marker);
+    writeRaw(marker);
     blankLine();
   }
 
-  /// 刚写完开始标记：下一段文字只换一行，不空行。
-  bool _afterMarker = false;
-
-  /// 原样写出，不合并空白，比如列表项的缩进和符号。
-  void prefix(String text) {
+  /// 原样写出，不合并空白，比如列表项的缩进和符号、结束标记。
+  void writeRaw(String text) {
     _flush();
     _buffer.write(text);
   }
-
-  /// 链接的编号，从 1 开始；同一个链接用同一个编号。
-  int link(String url) => _number(links, url);
 
   String? get result => _buffer.isEmpty ? null : _buffer.toString();
 }

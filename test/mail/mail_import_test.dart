@@ -324,10 +324,10 @@ void main() {
       final id = (await h.mail.watchMails().first).single.id;
       final detail = (await h.mail.mailDetail(id))!;
 
-      expect(detail.bodyText, 'Sign up here [1].\n\n[图片]');
-      expect(detail.links, ['https://example.com/form']);
-      expect(detail.hasInlineImages, isTrue);
-      expect(detail.bodyPossiblyIncomplete, isFalse);
+      expect(detail.body.text, 'Sign up here [1].\n\n[图片]');
+      expect(detail.body.links, ['https://example.com/form']);
+      expect(detail.body.hasInlineImages, isTrue);
+      expect(detail.body.possiblyIncomplete, isFalse);
     });
 
     test('用了 bodyPreview 的邮件标记正文可能不完整', () async {
@@ -339,9 +339,9 @@ void main() {
       final id = (await h.mail.watchMails().first).single.id;
       final detail = (await h.mail.mailDetail(id))!;
 
-      expect(detail.bodyText, 'Lunch at noon.');
-      expect(detail.links, isEmpty);
-      expect(detail.bodyPossiblyIncomplete, isTrue);
+      expect(detail.body.text, 'Lunch at noon.');
+      expect(detail.body.links, isEmpty);
+      expect(detail.body.possiblyIncomplete, isTrue);
     });
 
     test('没有这封邮件时返回 null', () async {

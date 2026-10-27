@@ -9,6 +9,7 @@ import 'package:uuid/uuid.dart';
 
 import '../planner/planner_exceptions.dart';
 import '../storage/planner_database.dart';
+import 'body_text.dart';
 import 'export_parser.dart';
 import 'mail_preview.dart';
 import 'mail_states.dart';
@@ -191,12 +192,10 @@ class MailService {
               receivedAt: Value(mail.receivedAt?.millisecondsSinceEpoch),
               importance: Value(mail.importance),
               hasAttachments: Value(mail.hasAttachments),
-              hasInlineImages: Value(mail.hasInlineImages),
+              hasInlineImages: Value(mail.body.hasInlineImages),
               bodyText: Value(mail.body.text),
               bodyPossiblyIncomplete: Value(mail.body.possiblyIncomplete),
-              links: Value(
-                mail.body.links.isEmpty ? null : jsonEncode(mail.body.links),
-              ),
+              links: Value(_encodeLinks(mail.body.links)),
               analysisStatus: MailAnalysisStatus.pending,
               sourceFileId: fileId,
               importedAt: now,
@@ -253,13 +252,12 @@ class MailService {
     if (row == null) return null;
     return MailDetail(
       preview: _preview(row),
-      bodyText: row.bodyText,
-      links: switch (row.links) {
-        final json? => (jsonDecode(json) as List<Object?>).cast<String>(),
-        null => const [],
-      },
-      hasInlineImages: row.hasInlineImages,
-      bodyPossiblyIncomplete: row.bodyPossiblyIncomplete,
+      body: MailBody(
+        text: row.bodyText,
+        links: _decodeLinks(row.links),
+        hasInlineImages: row.hasInlineImages,
+        possiblyIncomplete: row.bodyPossiblyIncomplete,
+      ),
     );
   });
 
@@ -328,3 +326,12 @@ class MailService {
 
   int get _nowMillis => _clock.now().toUtc().millisecondsSinceEpoch;
 }
+
+/// 邮件的链接列存成 URL 的 JSON 数组；没有链接时为 null。
+String? _encodeLinks(List<String> links) =>
+    links.isEmpty ? null : jsonEncode(links);
+
+List<String> _decodeLinks(String? json) => switch (json) {
+  final json? => (jsonDecode(json) as List<Object?>).cast<String>(),
+  null => const [],
+};

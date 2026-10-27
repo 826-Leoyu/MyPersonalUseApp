@@ -145,7 +145,7 @@ void main() {
       ]),
     ).mails;
 
-    expect(mails.map((m) => m.hasInlineImages), [isTrue, isFalse]);
+    expect(mails.map((m) => m.body.hasInlineImages), [isTrue, isFalse]);
   });
 
   test('收件时间缺失或解析不了时为空', () {
