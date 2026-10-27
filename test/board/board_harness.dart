@@ -127,6 +127,27 @@ class BoardHarness {
     });
   }
 
+  /// 在启动 App 之前用 [MailService] 准备数据，比如加入一个事项。
+  Future<T> seedWithMail<T>(
+    WidgetTester tester,
+    Future<T> Function(MailService service) action,
+  ) async {
+    final result = await tester.runAsync(() async {
+      final database = _newConnection();
+      try {
+        return await action(
+          MailService(
+            planner: PlannerService(database: database, clock: _clock),
+            clock: _clock,
+          ),
+        );
+      } finally {
+        await database.close();
+      }
+    });
+    return result as T;
+  }
+
   /// 在启动 App 之前选好邮件文件夹 [folder]，并按 [scans] 扫描几次（中间
   /// 隔一分钟）。
   Future<void> seedMailFolder(

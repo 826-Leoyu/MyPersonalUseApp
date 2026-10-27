@@ -214,6 +214,14 @@ final mailCardIdsProvider = StreamProvider<Set<String>>((ref) async* {
   yield* service.watchMailCardIds();
 }, retry: (_, _) => null);
 
+/// 已加入的卡片上的更新建议，按卡片 id。读不出来时不显示提示条。
+final mailCardUpdatesProvider = StreamProvider<Map<String, CardUpdate>>((
+  ref,
+) async* {
+  final service = await ref.watch(mailServiceProvider.future);
+  yield* service.watchCardUpdates();
+}, retry: (_, _) => null);
+
 /// 已导入的邮件，给邮件预览列表用。读取失败时是错误状态。
 final mailPreviewsProvider = StreamProvider.autoDispose<List<MailPreview>>(
   (ref) async* {

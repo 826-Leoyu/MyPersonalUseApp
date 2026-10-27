@@ -1,4 +1,5 @@
 import '../planner/card_time.dart';
+import 'item_changes.dart';
 
 /// "新邮件事项"栏里的一条候选事项。
 class MailItemCandidate {
@@ -13,6 +14,8 @@ class MailItemCandidate {
     required this.dueTime,
     required this.optional,
     required this.hasUnanalyzedAttachments,
+    required this.updated,
+    required this.relatedHint,
     required this.mailId,
     required this.mailSubject,
     required this.sender,
@@ -39,7 +42,14 @@ class MailItemCandidate {
   /// 邮件有附件或图片，没有分析，栏里提示"附件或图片未分析"。
   final bool hasUnanalyzedAttachments;
 
-  /// 来源邮件。
+  /// 被后续邮件直接更新过，栏里标"已更新"。
+  final bool updated;
+
+  /// 后续邮件涉及已完成、已删除或已忽略的事项时，注明和哪件事有关，例如
+  /// "可能和已完成的《交作业 3》有关"；没有相关事项时为 null。
+  final String? relatedHint;
+
+  /// 来源邮件；被后续邮件更新过时是最新的那封。
   final String mailId;
 
   /// 来源邮件的主题，没有主题时为"（无主题）"。
@@ -109,4 +119,24 @@ class FilteredEntry {
 
   /// 邮件的正文已经清除，[这封有用] 不可用。
   final bool bodyCleared;
+}
+
+/// 已加入的卡片上的一条更新建议：后续邮件提出的改动，她点 [采用] 才写到
+/// 卡片上。
+class CardUpdate {
+  const CardUpdate({
+    required this.id,
+    required this.cardId,
+    required this.changes,
+    required this.cardTimes,
+  });
+
+  final String id;
+  final String cardId;
+
+  /// 建议改动的字段和新值。
+  final ItemChanges changes;
+
+  /// 卡片现在的两个时间，提示里显示"截止 Oct 30 → Nov 2"用。
+  final CardTimes cardTimes;
 }

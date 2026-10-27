@@ -247,9 +247,13 @@ class _CandidateTileState extends ConsumerState<_CandidateTile> {
                   Expanded(
                     child: Text(item.title, style: textTheme.titleSmall),
                   ),
+                  if (item.updated) ...[
+                    const SizedBox(width: PlannerTheme.space2),
+                    const _Tag('已更新'),
+                  ],
                   if (item.optional) ...[
                     const SizedBox(width: PlannerTheme.space2),
-                    const _OptionalTag(),
+                    const _Tag('可选'),
                   ],
                 ],
               ),
@@ -260,6 +264,11 @@ class _CandidateTileState extends ConsumerState<_CandidateTile> {
                 overflow: TextOverflow.ellipsis,
                 style: textTheme.bodySmall?.copyWith(color: mutedColor),
               ),
+              if (item.relatedHint case final note?)
+                Text(
+                  note,
+                  style: textTheme.bodySmall?.copyWith(color: mutedColor),
+                ),
               if (item.hasUnanalyzedAttachments)
                 Text(
                   '附件或图片未分析',
@@ -313,9 +322,11 @@ class _CandidateTileState extends ConsumerState<_CandidateTile> {
   }
 }
 
-/// 可选活动上的"可选"标签。
-class _OptionalTag extends StatelessWidget {
-  const _OptionalTag();
+/// 事项标题旁边的小标签：可选活动的"可选"、被后续邮件更新过的"已更新"。
+class _Tag extends StatelessWidget {
+  const _Tag(this.text);
+
+  final String text;
 
   @override
   Widget build(BuildContext context) {
@@ -328,7 +339,7 @@ class _OptionalTag extends StatelessWidget {
       child: Padding(
         padding: PlannerTheme.tagPadding,
         child: Text(
-          '可选',
+          text,
           style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color),
         ),
       ),
