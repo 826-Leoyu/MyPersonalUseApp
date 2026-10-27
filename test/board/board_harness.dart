@@ -14,6 +14,7 @@ import 'package:my_personal_use_app/planner/planner_service.dart';
 import 'package:my_personal_use_app/storage/planner_database.dart';
 import 'package:sqlite3/sqlite3.dart';
 
+import '../mail/fake_analyzer.dart';
 import '../support/failing_storage.dart';
 
 /// 切入点 2 的测试环境：真实的 [PlannerApp] + 真实的 [PlannerService] +
@@ -43,6 +44,9 @@ class BoardHarness {
 
   /// 邮件预览里点「导入文件」时选中的文件路径；为 null 时相当于取消选择。
   String? pickedMailFile;
+
+  /// App 用的分析器：按脚本返回结果，不调用真的 Claude Code。
+  final analyzer = FakeAnalyzer();
 
   /// 打开后，App 的所有写入都会报错；读取不受影响。
   set failWrites(bool value) =>
@@ -162,6 +166,7 @@ class BoardHarness {
       clockProvider.overrideWithValue(_clock),
       plannerDatabaseFactoryProvider.overrideWithValue(_openDatabase),
       pickMailExportFileProvider.overrideWithValue(() async => pickedMailFile),
+      mailAnalyzerProvider.overrideWithValue(analyzer),
       if (displayedDay case final day?)
         displayedDayProvider.overrideWithBuild((ref, _) => day),
     ],

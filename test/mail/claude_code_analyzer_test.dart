@@ -477,10 +477,9 @@ class FakeProcess implements Process {
     String stdout = '',
     String stderr = '',
     int exitCode = 0,
-    bool hang = false,
+    this._hang = false,
   }) : _stdout = utf8.encode(stdout),
-       _stderr = utf8.encode(stderr),
-       _hang = hang {
+       _stderr = utf8.encode(stderr) {
     _stdinController.stream.listen(stdinBytes.addAll);
     if (!_hang) _exit.complete(exitCode);
   }
