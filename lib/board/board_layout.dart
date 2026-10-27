@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app/planner_theme.dart';
+import '../mail/mail_items_panel.dart';
 import '../planner/day_key.dart';
 import 'date_drawer.dart';
 import 'date_list.dart';
@@ -46,9 +47,10 @@ class DateSidebar extends StatelessWidget {
   );
 }
 
-/// 画布页面的外框：页头、左侧的日期抽屉或日期侧栏、[body]（画布）和悬浮
-/// 按钮。画布和加载中的页面共用它，两种模式下的结构一样，[body] 在树里的
-/// 位置不变：跨过断点、折叠侧栏时画布不重建，编辑的内容和焦点都还在。
+/// 画布页面的外框：页头、左侧的日期抽屉或日期侧栏、[body]（画布）、宽屏时
+/// 右侧的"新邮件事项"栏和悬浮按钮。画布和加载中的页面共用它，两种模式下的
+/// 结构一样，[body] 在树里的位置不变：跨过断点、折叠侧栏时画布不重建，编辑
+/// 的内容和焦点都还在。
 ///
 /// Windows 上抽屉开着时按 Esc 关上抽屉；关着时 Esc 照常交给画布的快捷键。
 ///
@@ -62,6 +64,7 @@ class BoardShell extends StatefulWidget {
     required this.drawer,
     required this.sidebar,
     required this.body,
+    this.mailPanel,
     this.floatingActionButton,
     this.drawerEnableOpenDragGesture = true,
     this.onWidenedWithDrawerOpen,
@@ -80,6 +83,10 @@ class BoardShell extends StatefulWidget {
   final Widget? sidebar;
 
   final Widget body;
+
+  /// 宽屏时画布右边的"新邮件事项"栏，挤着画布；为 null 时没有栏（收起来了、
+  /// 窄屏或者不是 Windows）。
+  final Widget? mailPanel;
 
   final Widget? floatingActionButton;
 
@@ -114,6 +121,7 @@ class _BoardShellState extends State<BoardShell> {
   @override
   Widget build(BuildContext context) {
     final sidebar = widget.wide ? widget.sidebar : null;
+    final mailPanel = widget.wide ? widget.mailPanel : null;
     // 抽屉开着时焦点在抽屉里，按键从抽屉往上传，先到这里，再到画布的快捷键。
     return CallbackShortcuts(
       bindings: {
@@ -137,12 +145,43 @@ class _BoardShellState extends State<BoardShell> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             ?sidebar,
-            // 有没有侧栏，画布都是最后一个，不会因为多了侧栏而重建。
-            Expanded(child: widget.body),
+            // 画布带着 key：变窄时左右两边的栏同时拿掉，画布也不会重建。
+            Expanded(key: const ValueKey('board-body'), child: widget.body),
+            ?mailPanel,
           ],
         ),
         floatingActionButton: widget.floatingActionButton,
       ),
     );
   }
+}
+
+/// 宽屏时画布右边的"新邮件事项"栏：浅灰的圆角面板，和左边的日期侧栏一样。
+/// 宽度连同四周的留白一共是 [mailItemsPanelWidth]。
+class MailItemsSidePanel extends StatelessWidget {
+  const MailItemsSidePanel({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: mailItemsPanelWidth,
+    child: SafeArea(
+      left: false,
+      child: Padding(
+        padding: const EdgeInsetsDirectional.fromSTEB(
+          0,
+          PlannerTheme.space3,
+          PlannerTheme.space3,
+          PlannerTheme.space3,
+        ),
+        child: Material(
+          color: PlannerColors.of(context).panel,
+          borderRadius: PlannerTheme.panelRadius,
+          clipBehavior: Clip.antiAlias,
+          child: child,
+        ),
+      ),
+    ),
+  );
 }

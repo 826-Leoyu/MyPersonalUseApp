@@ -3,9 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/providers.dart';
 import '../formatting/date_format.dart';
+import '../mail/mail_items_panel.dart';
 import '../mail/mail_preview_page.dart';
 import '../planner/day_key.dart';
 import '../planner/planner_exceptions.dart';
+import '../planner/task_card.dart';
 import '../settings/settings_page.dart';
 import 'board_canvas.dart';
 import 'board_layout.dart';
@@ -40,6 +42,10 @@ class BoardPage extends ConsumerStatefulWidget {
   /// 标题栏上打开邮件预览的按钮的 key（只在 Windows 上有）。
   static const mailButtonKey = ValueKey('mail-button');
 
+  /// 标题栏上「邮件事项」按钮的 key：宽屏时栏收起来才有，窄屏时打开底部
+  /// 面板（只在 Windows 上有）。
+  static const mailItemsButtonKey = ValueKey('mail-items-button');
+
   /// 标题栏上打开设置页的按钮的 key（只在 Windows 上有：设置页现在只有邮件）。
   static const settingsButtonKey = ValueKey('settings-button');
 
@@ -61,6 +67,33 @@ class _BoardPageState extends ConsumerState<BoardPage> {
   /// 日期侧栏的 key：换一天时画布整个换掉，侧栏跟着挪到新的画布上，滚到哪里
   /// 还在哪里。
   final _sidebarKey = GlobalKey();
+
+  /// 宽屏时"新邮件事项"栏展开着没有。只在这次运行内记住。
+  bool _mailPanelOpen = true;
+
+  /// 画布的可见区域（页头以下、两边的栏之间），[加入] 时用它算新卡片放在
+  /// 哪里。
+  final _bodyKey = GlobalKey();
+
+  /// [加入] 到 [day] 时新卡片的左上角：放在那一天画布可见区域的中间，和
+  /// 「＋」新建卡片一样。
+  Offset _newCardPosition(DayKey day) {
+    final size = _bodyKey.currentContext?.size ?? Size.zero;
+    final center = _transformOf(day).toScene(size.center(Offset.zero));
+    return center -
+        const Offset(TaskCard.defaultWidth / 2, TaskCard.defaultHeight / 2);
+  }
+
+  /// 窄屏时从页头打开的底部面板，里面是"新邮件事项"栏。
+  void _openMailItemsSheet() => showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (context) => SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.6,
+      child: MailItemsPanel(newCardPosition: _newCardPosition),
+    ),
+  );
 
   @override
   void dispose() {
@@ -141,6 +174,21 @@ class _BoardPageState extends ConsumerState<BoardPage> {
           icon: const Icon(Icons.delete_outline),
         ),
         if (mailAvailable) ...[
+          if (!wide || !_mailPanelOpen)
+            Tooltip(
+              message: '邮件事项',
+              child: TextButton.icon(
+                key: BoardPage.mailItemsButtonKey,
+                onPressed: wide
+                    ? () => setState(() => _mailPanelOpen = true)
+                    : _openMailItemsSheet,
+                icon: const Icon(Icons.inbox_outlined),
+                // 数量还没读到时只显示图标。
+                label: Text(
+                  '${ref.watch(mailCandidatesProvider).value?.length ?? ''}',
+                ),
+              ),
+            ),
           IconButton(
             key: BoardPage.mailButtonKey,
             tooltip: '邮件',
@@ -168,7 +216,15 @@ class _BoardPageState extends ConsumerState<BoardPage> {
       sidebar: _sidebarOpen
           ? DateSidebar(key: _sidebarKey, onSelect: _selectDay)
           : null,
-      body: body,
+      body: KeyedSubtree(key: _bodyKey, child: body),
+      mailPanel: mailAvailable && _mailPanelOpen
+          ? MailItemsSidePanel(
+              child: MailItemsPanel(
+                newCardPosition: _newCardPosition,
+                onCollapse: () => setState(() => _mailPanelOpen = false),
+              ),
+            )
+          : null,
       floatingActionButton: floatingActionButton,
       drawerEnableOpenDragGesture: !dragging,
       // 变宽时抽屉开着，就换成展开的侧栏。

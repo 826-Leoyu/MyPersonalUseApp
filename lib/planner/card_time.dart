@@ -55,3 +55,30 @@ class CardTime {
 
 /// 一张卡片的两个时间，为 null 的表示没有。
 typedef CardTimes = ({CardTime? event, CardTime? due});
+
+/// 卡片时间存进数据库三列（值、精度、待确认）的值，见 planner_database.dart
+/// 开头的说明。邮件事项的两个时间也用它。
+({String? value, CardTimePrecision? precision, bool pending}) cardTimeToColumns(
+  CardTime? time,
+) => (
+  value: time?.time?.toIso8601String() ?? time?.day?.toString(),
+  precision: time?.precision,
+  pending: time?.pending ?? false,
+);
+
+/// 从三列读回卡片时间；没有值也不待确认时为 null。
+CardTime? cardTimeFromColumns(
+  String? value,
+  CardTimePrecision? precision,
+  bool pending,
+) => switch ((value, precision)) {
+  (final value?, CardTimePrecision.dateTime) => CardTime.dateTime(
+    DateTime.parse(value),
+    pending: pending,
+  ),
+  (final value?, CardTimePrecision.date) => CardTime.date(
+    DayKey.parse(value),
+    pending: pending,
+  ),
+  _ => pending ? const CardTime.pending() : null,
+};

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:my_personal_use_app/planner/card_time.dart';
 import 'package:my_personal_use_app/planner/day_key.dart';
 import 'package:my_personal_use_app/planner/planner_exceptions.dart';
 import 'package:my_personal_use_app/planner/task_card.dart';
@@ -160,6 +161,68 @@ void main() {
           x: 0,
           y: 0,
           title: '迟到的计划',
+        ),
+        throwsA(isA<InvalidState>()),
+      );
+    });
+  });
+
+  group('在调用方事务内新建卡片', () {
+    test('带着备注和两个时间出现在画布上', () async {
+      final service = harness.service;
+      final due = CardTime.dateTime(DateTime.utc(2026, 10, 24, 3, 59));
+      final event = CardTime.date(DayKey(2026, 10, 22));
+
+      final card = await service.database.transaction(
+        () => service.createCardInTransaction(
+          harness.today,
+          x: 10,
+          y: 20,
+          title: '交作业',
+          note: '上传 PDF',
+          times: (event: event, due: due),
+        ),
+      );
+
+      final saved = await cardOnBoard(card.id);
+      expect(saved.title, '交作业');
+      expect(saved.note, '上传 PDF');
+      expect((saved.x, saved.y), (10, 20));
+      expect(saved.eventTime, event);
+      expect(saved.dueTime, due);
+    });
+
+    test('调用方的事务失败时卡片一起回滚', () async {
+      final service = harness.service;
+
+      await expectLater(
+        service.database.transaction(() async {
+          await service.createCardInTransaction(
+            harness.today,
+            x: 0,
+            y: 0,
+            title: '交作业',
+          );
+          throw Exception('调用方的后续写入失败');
+        }),
+        throwsException,
+      );
+
+      final board = await service.watchDay(harness.today).first;
+      expect(board.cards, isEmpty);
+    });
+
+    test('和普通新建一样不能放到过去的日期', () async {
+      final service = harness.service;
+
+      await expectLater(
+        service.database.transaction(
+          () => service.createCardInTransaction(
+            harness.today.addDays(-1),
+            x: 0,
+            y: 0,
+            title: '交作业',
+          ),
         ),
         throwsA(isA<InvalidState>()),
       );

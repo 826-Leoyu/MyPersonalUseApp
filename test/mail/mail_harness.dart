@@ -4,15 +4,17 @@ import 'package:clock/clock.dart';
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:my_personal_use_app/mail/mail_service.dart';
+import 'package:my_personal_use_app/planner/day_key.dart';
 import 'package:my_personal_use_app/planner/planner_service.dart';
 import 'package:my_personal_use_app/storage/planner_database.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import '../support/failing_storage.dart';
+import 'fake_analyzer.dart';
 import 'mail_fixtures.dart';
 
 /// 切入点 3 的测试环境：真实的 [MailService] 和 [PlannerService] + 内存
-/// SQLite + 假时钟 + 临时目录。
+/// SQLite + 假时钟 + 临时目录 + 假分析器。
 ///
 /// 底层的内存数据库在 [reopen] 之后仍然保留，用来模拟"重启 App"。
 class MailHarness {
@@ -28,11 +30,16 @@ class MailHarness {
   late MailService mail;
   late PlannerService planner;
 
+  /// 按脚本返回结果的分析器，[reopen] 之后还是同一个。
+  final analyzer = FakeAnalyzer();
+
   /// 放导出文件的临时目录。
   final Directory directory;
 
   /// 假时钟的当前时间（本地时间），可以直接修改来模拟时间流逝。
   DateTime now = DateTime(2026, 10, 20, 9);
+
+  DayKey get today => DayKey.fromDateTime(now);
 
   /// 打开后，所有写入都会报错；读取不受影响。
   set failWrites(bool value) =>
@@ -50,12 +57,18 @@ class MailHarness {
       ).interceptWith(_failingStorage),
     );
     final clock = Clock(() => now);
-    mail = MailService(database: _database, clock: clock);
     planner = PlannerService(database: _database, clock: clock);
+    mail = MailService(
+      planner: planner,
+      analyzer: analyzer,
+      clock: clock,
+      timeZoneName: () => 'Eastern Daylight Time',
+    );
   }
 
   /// 关闭当前连接，在同一个内存数据库上重新建立数据库连接和 service。
   Future<void> reopen() async {
+    await mail.waitForAnalysis();
     await _database.close();
     _open();
   }
@@ -76,6 +89,7 @@ class MailHarness {
       (await mail.watchMails().first).map((m) => m.subject).toList();
 
   Future<void> dispose() async {
+    await mail.waitForAnalysis();
     await _database.close();
     _sqlite.close();
     directory.deleteSync(recursive: true);

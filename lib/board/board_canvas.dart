@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../app/planner_theme.dart';
 import '../app/providers.dart';
 import '../formatting/date_format.dart';
+import '../mail/mail_detail_page.dart';
 import '../planner/card_colors.dart';
 import '../planner/card_time.dart';
 import '../planner/carry_over_record.dart';
@@ -69,6 +70,9 @@ class BoardCanvas extends ConsumerStatefulWidget {
   /// 顺延过的卡片右上角「顺延」标记的 key。
   static Key carriedOverTagKey(String cardId) =>
       ValueKey('carried-over-tag-$cardId');
+
+  /// 来自邮件的卡片右上角信封图标的 key。
+  static Key mailIconKey(String cardId) => ValueKey('mail-icon-$cardId');
 
   /// 选中的卡片右下角调整大小的手柄的 key。
   static Key resizeHandleKey(String cardId) =>
@@ -376,6 +380,28 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     // 过去的日期不能新建卡片。
     if (position == null || !widget.canCreateCards) return;
     _save(() => _selection.newCardAt(_transform.toScene(position)));
+  }
+
+  /// 编辑来自邮件的卡片时点「查看来源邮件」：先保存编辑的内容，再打开那封
+  /// 邮件。保存或读取失败时提示，不打开。
+  Future<void> _openSourceMail(String cardId) async {
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final String? mailId;
+    try {
+      await _selection.leaveBoard();
+    } on PlannerException catch (e) {
+      messenger?.showSnackBar(SnackBar(content: Text(saveFailureMessage(e))));
+      return;
+    }
+    try {
+      final service = await ref.read(mailServiceProvider.future);
+      mailId = await service.sourceMailOfCard(cardId);
+    } on PlannerException {
+      messenger?.showSnackBar(const SnackBar(content: Text('读取失败，请重试')));
+      return;
+    }
+    if (mailId != null) await MailDetailPage.open(navigator, mailId);
   }
 
   /// 画布的可视区域，不含标题栏。
@@ -951,6 +977,10 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
   Widget build(BuildContext context) {
     final cards = widget.board.cards;
     final selection = ref.watch(boardSelectionProvider);
+    // 读不出来时不显示信封图标，画布照常。
+    final mailCardIds = mailAvailable
+        ? ref.watch(mailCardIdsProvider).value ?? const <String>{}
+        : const <String>{};
     ref.listen(boardSelectionProvider, (_, next) {
       if (next is! Editing) _takeKeyboardFocus();
     });
@@ -1084,6 +1114,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
                 _CardView(
                   key: ValueKey(card.id),
                   card: card,
+                  fromMail: mailCardIds.contains(card.id),
                   armedTarget: card.id == armed?.targetId,
                   completing: _leaving.containsKey(card.id),
                   onCompleted: () => _onLeft(card.id),
@@ -1105,6 +1136,7 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
                   onResizeStart: () => _resizeHandleCardId = card.id,
                   onResizeUpdate: (size) => _onResizeUpdate(card, size),
                   onResizeEnd: () => _onResizeEnd(card),
+                  onOpenSourceMail: () => _openSourceMail(card.id),
                 ),
               if (armed != null) ..._armedPreview(armed, boxes),
               if (selection case final EditingNewCard draft)
@@ -1299,6 +1331,7 @@ class _CardView extends StatefulWidget {
   const _CardView({
     super.key,
     required this.card,
+    required this.fromMail,
     required this.armedTarget,
     required this.completing,
     required this.onCompleted,
@@ -1316,9 +1349,13 @@ class _CardView extends StatefulWidget {
     required this.onResizeStart,
     required this.onResizeUpdate,
     required this.onResizeEnd,
+    required this.onOpenSourceMail,
   });
 
   final TaskCard card;
+
+  /// 卡片是从邮件事项加入的：右上角有信封图标。
+  final bool fromMail;
 
   /// 拖着另一张卡片停在这张上面、松手就会连线或断开：放大并发光。
   final bool armedTarget;
@@ -1362,6 +1399,9 @@ class _CardView extends StatefulWidget {
   final VoidCallback onResizeStart;
   final void Function(Size size) onResizeUpdate;
   final VoidCallback onResizeEnd;
+
+  /// 编辑来自邮件的卡片时点「查看来源邮件」。
+  final VoidCallback onOpenSourceMail;
 
   @override
   State<_CardView> createState() => _CardViewState();
@@ -1458,21 +1498,34 @@ class _CardViewState extends State<_CardView> {
                       editing: editing,
                       day: card.dayKey,
                       textColor: textColor,
+                      onOpenSourceMail: widget.fromMail
+                          ? widget.onOpenSourceMail
+                          : null,
                     ),
                     null => _CardContent(card: card, textColor: textColor),
                   };
-                  if (!card.carriedOver) return content;
-                  // 「顺延」标记单独占右上角一列，不盖住标题、备注和编辑框；
-                  // 编辑时也显示。
+                  if (!card.carriedOver && !widget.fromMail) return content;
+                  // 信封图标和「顺延」标记单独占右上角一列，不盖住标题、备注
+                  // 和编辑框；编辑时也显示。
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(child: content),
                       const SizedBox(width: PlannerTheme.space2),
-                      _CarriedOverTag(
-                        key: BoardCanvas.carriedOverTagKey(card.id),
-                        textColor: textColor,
-                      ),
+                      if (widget.fromMail)
+                        Icon(
+                          key: BoardCanvas.mailIconKey(card.id),
+                          Icons.mail_outline,
+                          size: 16,
+                          color: textColor.withValues(alpha: 0.6),
+                        ),
+                      if (widget.fromMail && card.carriedOver)
+                        const SizedBox(width: PlannerTheme.space1),
+                      if (card.carriedOver)
+                        _CarriedOverTag(
+                          key: BoardCanvas.carriedOverTagKey(card.id),
+                          textColor: textColor,
+                        ),
                     ],
                   );
                 },
@@ -1759,6 +1812,7 @@ class _CardEditor extends StatefulWidget {
     required this.editing,
     required this.day,
     required this.textColor,
+    this.onOpenSourceMail,
   });
 
   final Editing editing;
@@ -1766,6 +1820,9 @@ class _CardEditor extends StatefulWidget {
   /// 卡片所在的那一天（新卡片是正在显示的那一天）：选日期时从这天开始。
   final DayKey day;
   final Color textColor;
+
+  /// 来自邮件的卡片：编辑框最下面有「查看来源邮件」，点它调用这个。
+  final VoidCallback? onOpenSourceMail;
 
   @override
   State<_CardEditor> createState() => _CardEditorState();
@@ -1839,6 +1896,20 @@ class _CardEditorState extends State<_CardEditor> {
             textColor: textColor,
             onChanged: (time) => setState(() => editing.dueTime = time),
           ),
+          if (widget.onOpenSourceMail case final onOpen?)
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton.icon(
+                style: TextButton.styleFrom(
+                  foregroundColor: textColor,
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                ),
+                onPressed: onOpen,
+                icon: const Icon(Icons.mail_outline, size: 16),
+                label: const Text('查看来源邮件'),
+              ),
+            ),
         ],
       ),
     );

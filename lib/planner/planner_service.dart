@@ -49,33 +49,87 @@ class PlannerService {
     required String title,
     int? colorArgb,
   }) async {
+    final cleanTitle = _validNewCard(dayKey, title);
+    return _write(
+      () => _insertCard(
+        dayKey,
+        x: x,
+        y: y,
+        title: cleanTitle,
+        colorArgb: colorArgb,
+      ),
+    );
+  }
+
+  /// 和 [createCard] 一样新建一张卡片，同时带上备注和两个时间，但不开自己的
+  /// 事务：只能在调用方的事务里调用（`MailService` 的 [加入]），调用方的事务
+  /// 失败时卡片一起回滚。存储报错原样抛出，交给调用方的事务处理。
+  Future<TaskCard> createCardInTransaction(
+    DayKey dayKey, {
+    required double x,
+    required double y,
+    required String title,
+    String? note,
+    CardTimes times = (event: null, due: null),
+  }) async {
+    final cleanTitle = _validNewCard(dayKey, title);
+    _validNote(note);
+    return _insertCard(
+      dayKey,
+      x: x,
+      y: y,
+      title: cleanTitle,
+      note: note,
+      times: times,
+    );
+  }
+
+  /// 新建卡片的检查：标题合法、不是过去的日期。返回去掉首尾空白的标题。
+  String _validNewCard(DayKey dayKey, String title) {
     final cleanTitle = _validTitle(title);
     if (dayKey < _today) {
       throw const InvalidState('过去的日期不能新建卡片');
     }
-    return _write(() async {
-      final now = _nowMillis;
-      final row = TaskCardRow(
-        id: _generateId(),
-        dayKey: dayKey.toString(),
-        title: cleanTitle,
-        x: x,
-        y: y,
-        width: TaskCard.defaultWidth,
-        height: TaskCard.defaultHeight,
-        zIndex: await _maxZIndex(dayKey) + 1,
-        colorArgb: colorArgb ?? TaskCard.defaultColorArgb,
-        status: CardStatus.active,
-        carriedOver: false,
-        originalDayKey: dayKey.toString(),
-        createdAt: now,
-        updatedAt: now,
-        eventTimePending: false,
-        dueTimePending: false,
-      );
-      await _db.into(_db.taskCards).insert(row);
-      return _toCard(row);
-    });
+    return cleanTitle;
+  }
+
+  Future<TaskCard> _insertCard(
+    DayKey dayKey, {
+    required double x,
+    required double y,
+    required String title,
+    String? note,
+    CardTimes times = (event: null, due: null),
+    int? colorArgb,
+  }) async {
+    final now = _nowMillis;
+    final event = cardTimeToColumns(times.event);
+    final due = cardTimeToColumns(times.due);
+    final row = TaskCardRow(
+      id: _generateId(),
+      dayKey: dayKey.toString(),
+      title: title,
+      note: note,
+      x: x,
+      y: y,
+      width: TaskCard.defaultWidth,
+      height: TaskCard.defaultHeight,
+      zIndex: await _maxZIndex(dayKey) + 1,
+      colorArgb: colorArgb ?? TaskCard.defaultColorArgb,
+      status: CardStatus.active,
+      carriedOver: false,
+      originalDayKey: dayKey.toString(),
+      createdAt: now,
+      updatedAt: now,
+      eventTime: event.value,
+      eventTimePrecision: event.precision,
+      eventTimePending: event.pending,
+      dueTime: due.value,
+      dueTimePrecision: due.precision,
+      dueTimePending: due.pending,
+    );
+    await _db.into(_db.taskCards).insert(row);
+    return _toCard(row);
   }
 
   /// 修改标题和备注；[note] 为 null 表示没有备注。
@@ -89,16 +143,14 @@ class PlannerService {
     CardTimes? times,
   }) async {
     final cleanTitle = _validTitle(title);
-    if (note != null && note.characters.length > maxNoteLength) {
-      throw const InvalidInput('备注最多 $maxNoteLength 个字');
-    }
+    _validNote(note);
     var changes = TaskCardsCompanion(
       title: Value(cleanTitle),
       note: Value(note),
     );
     if (times != null) {
-      final event = _toColumns(times.event);
-      final due = _toColumns(times.due);
+      final event = cardTimeToColumns(times.event);
+      final due = cardTimeToColumns(times.due);
       changes = changes.copyWith(
         eventTime: Value(event.value),
         eventTimePrecision: Value(event.precision),
@@ -761,6 +813,13 @@ class PlannerService {
     return trimmed;
   }
 
+  /// 备注超过 [maxNoteLength] 个字时抛出 [InvalidInput]。
+  static void _validNote(String? note) {
+    if (note != null && note.characters.length > maxNoteLength) {
+      throw const InvalidInput('备注最多 $maxNoteLength 个字');
+    }
+  }
+
   static TaskCard _toCard(TaskCardRow row) => TaskCard(
     id: row.id,
     dayKey: DayKey.parse(row.dayKey),
@@ -779,42 +838,17 @@ class PlannerService {
     deletedAt: _fromMillis(row.deletedAt),
     createdAt: _fromMillis(row.createdAt)!,
     updatedAt: _fromMillis(row.updatedAt)!,
-    eventTime: _fromColumns(
+    eventTime: cardTimeFromColumns(
       row.eventTime,
       row.eventTimePrecision,
       row.eventTimePending,
     ),
-    dueTime: _fromColumns(
+    dueTime: cardTimeFromColumns(
       row.dueTime,
       row.dueTimePrecision,
       row.dueTimePending,
     ),
   );
-
-  /// 卡片时间存进三列的值，见 planner_database.dart 开头的说明。
-  static ({String? value, CardTimePrecision? precision, bool pending})
-  _toColumns(CardTime? time) => (
-    value: time?.time?.toIso8601String() ?? time?.day?.toString(),
-    precision: time?.precision,
-    pending: time?.pending ?? false,
-  );
-
-  /// 从三列读回卡片时间；没有值也不待确认时为 null。
-  static CardTime? _fromColumns(
-    String? value,
-    CardTimePrecision? precision,
-    bool pending,
-  ) => switch ((value, precision)) {
-    (final value?, CardTimePrecision.dateTime) => CardTime.dateTime(
-      DateTime.parse(value),
-      pending: pending,
-    ),
-    (final value?, CardTimePrecision.date) => CardTime.date(
-      DayKey.parse(value),
-      pending: pending,
-    ),
-    _ => pending ? const CardTime.pending() : null,
-  };
 
   static Link _toLink(LinkRow row) => Link(
     id: row.id,

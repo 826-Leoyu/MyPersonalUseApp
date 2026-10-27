@@ -1,14 +1,18 @@
 /// 界面状态层：用 Riverpod 把 [PlannerService] 和它的数据流暴露给界面。
 library;
 
+import 'dart:async';
+
 import 'package:clock/clock.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../mail/claude_code_analyzer.dart';
+import '../mail/mail_analyzer.dart';
+import '../mail/mail_items.dart';
 import '../mail/mail_preview.dart';
 import '../mail/mail_service.dart';
-
 import '../planner/day_board.dart';
 import '../planner/day_counts.dart';
 import '../planner/day_key.dart';
@@ -111,13 +115,38 @@ final trashProvider = StreamProvider.autoDispose<List<TrashedCard>>(
 /// 邮件功能只在 Windows 上有（spec 0002"平台"）；其他平台看不到任何入口。
 bool get mailAvailable => defaultTargetPlatform == TargetPlatform.windows;
 
-/// 打开好的 [MailService]，和 [PlannerService] 共用同一个数据库。
+/// 分析邮件用的分析器：本机的 Claude Code。测试里换成假的。
+final mailAnalyzerProvider = Provider<MailAnalyzer>(
+  (ref) => ClaudeCodeAnalyzer(),
+);
+
+/// 打开好的 [MailService]，和 [PlannerService] 共用同一个数据库。打开后
+/// 接着分析上次没分析完的邮件（M-13），不等分析结束。
 final mailServiceProvider = FutureProvider<MailService>((ref) async {
   final planner = await ref.watch(plannerServiceProvider.future);
-  return MailService(
-    database: planner.database,
+  final service = MailService(
+    planner: planner,
+    analyzer: ref.watch(mailAnalyzerProvider),
     clock: ref.watch(clockProvider),
   );
+  unawaited(service.analyzePending());
+  return service;
+}, retry: (_, _) => null);
+
+/// "新邮件事项"栏里的候选事项，排好序。读取失败时是错误状态。
+final mailCandidatesProvider = StreamProvider<List<MailItemCandidate>>(
+  (ref) async* {
+    final service = await ref.watch(mailServiceProvider.future);
+    yield* service.watchCandidates();
+  },
+  // 不自动重试：读不出来时栏里显示提示，由用户点「重试」。
+  retry: (_, _) => null,
+);
+
+/// 由邮件事项加入的卡片的 id，给卡片上的信封图标用。读不出来时不显示图标。
+final mailCardIdsProvider = StreamProvider<Set<String>>((ref) async* {
+  final service = await ref.watch(mailServiceProvider.future);
+  yield* service.watchMailCardIds();
 }, retry: (_, _) => null);
 
 /// 已导入的邮件，给邮件预览列表用。读取失败时是错误状态。
