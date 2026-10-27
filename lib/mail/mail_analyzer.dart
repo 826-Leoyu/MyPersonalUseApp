@@ -25,7 +25,7 @@ enum MailCategory {
       this == actionRequired || this == optionalEvent;
 }
 
-/// 分析失败的类型，决定之后怎么重试（重试规则在 #86）。
+/// 分析失败的类型，决定之后怎么重试（spec 0002"有类型的失败"）。
 enum AnalysisFailureType {
   /// 没有安装 Claude Code。
   notInstalled,

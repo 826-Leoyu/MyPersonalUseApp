@@ -184,6 +184,22 @@ void main() {
 
       expect((await h.mail.importStatus()).notices, isEmpty);
     });
+
+    test('找不到文件夹时，分析的提示照样列出来', () async {
+      h.analyzer.fails('Mail a', AnalysisFailureType.notLoggedIn);
+      h.writeFile('mail-1.json', fakeEnvelope([mail('a')]));
+      await h.scanTwice();
+      await h.mail.analyzePending();
+      final renamed = h.directory.renameSync('${h.directory.path}-renamed');
+      addTearDown(() => renamed.renameSync(h.directory.path));
+
+      await h.mail.scanFolder();
+
+      expect((await h.mail.importStatus()).notices, [
+        const FolderMissing(),
+        const ClaudeNotLoggedIn(),
+      ]);
+    });
   });
 
   group('状态行（M-35）', () {
@@ -285,6 +301,12 @@ void main() {
   });
 
   group('空档（M-36）', () {
+    // 这里一次导入几百封邮件，会碰到每天自动分析的上限；只看导入的提示。
+    Future<List<ImportNotice>> importNotices() async => [
+      for (final notice in (await h.mail.importStatus()).notices)
+        if (notice is! AnalysisPaused) notice,
+    ];
+
     /// 满的导出文件：从 [from] 起每分钟一封，共 [MailService.exportBatchSize]
     /// 封，最新的在前。
     Map<String, Object?> fullFile(String prefix, DateTime from) =>
@@ -302,9 +324,7 @@ void main() {
       h.writeFile('mail-2.json', fullFile('b', DateTime.utc(2026, 10, 19)));
       await h.scanTwice();
 
-      expect((await h.mail.importStatus()).notices, [
-        const PossiblyMissedMails(),
-      ]);
+      expect(await importNotices(), [const PossiblyMissedMails()]);
     });
 
     test('空档后面又来了正常的文件，提示还在', () async {
@@ -319,9 +339,7 @@ void main() {
       );
       await h.scanTwice();
 
-      expect((await h.mail.importStatus()).notices, [
-        const PossiblyMissedMails(),
-      ]);
+      expect(await importNotices(), [const PossiblyMissedMails()]);
     });
 
     test('一次扫描导入好几个文件时，中间的空档也提示', () async {
@@ -333,9 +351,7 @@ void main() {
       );
       await h.scanTwice();
 
-      expect((await h.mail.importStatus()).notices, [
-        const PossiblyMissedMails(),
-      ]);
+      expect(await importNotices(), [const PossiblyMissedMails()]);
     });
 
     test('空档后面的文件导入 14 天以后不再提示', () async {
@@ -368,7 +384,7 @@ void main() {
       );
       await h.scanTwice();
 
-      expect((await h.mail.importStatus()).notices, isEmpty);
+      expect(await importNotices(), isEmpty);
     });
 
     test('有一个文件不满时不提示', () async {
@@ -380,7 +396,7 @@ void main() {
       );
       await h.scanTwice();
 
-      expect((await h.mail.importStatus()).notices, isEmpty);
+      expect(await importNotices(), isEmpty);
     });
 
     test('手动补读把空档补上以后不再提示', () async {
@@ -399,7 +415,7 @@ void main() {
       );
       await h.scanTwice();
 
-      expect((await h.mail.importStatus()).notices, isEmpty);
+      expect(await importNotices(), isEmpty);
     });
   });
 

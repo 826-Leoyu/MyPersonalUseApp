@@ -78,6 +78,43 @@ class PossiblyMissedMails extends _PlainNotice {
   const PossiblyMissedMails();
 }
 
+/// 今天自动分析的邮件到了上限，已暂停；点 [继续] 解除今天的暂停。
+class AnalysisPaused extends _PlainNotice {
+  const AnalysisPaused();
+}
+
+/// 没有找到 Claude Code，有邮件在等它分析。
+class ClaudeNotInstalled extends _PlainNotice {
+  const ClaudeNotInstalled();
+}
+
+/// Claude Code 没有登录，有邮件在等它分析。
+class ClaudeNotLoggedIn extends _PlainNotice {
+  const ClaudeNotLoggedIn();
+}
+
+/// Claude 的额度用完了，稍后自动重试。
+class ClaudeQuotaExhausted extends _PlainNotice {
+  const ClaudeQuotaExhausted();
+}
+
+/// 这么多封邮件分析失败（输出格式不对重试了 3 次），点 [重试] 再分析。
+class AnalysisFailures extends ImportNotice {
+  const AnalysisFailures(this.count);
+
+  final int count;
+
+  @override
+  bool operator ==(Object other) =>
+      other is AnalysisFailures && other.count == count;
+
+  @override
+  int get hashCode => count.hashCode;
+
+  @override
+  String toString() => 'AnalysisFailures($count)';
+}
+
 /// 导入的情况。
 class MailImportStatus {
   const MailImportStatus({

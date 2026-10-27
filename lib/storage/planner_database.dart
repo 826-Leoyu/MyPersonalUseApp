@@ -242,7 +242,9 @@ class MailItemUpdates extends Table {
 }
 
 /// 键值表：`lastMaintenanceDay`、`schemaVersion`、`mailboxAddress`、
-/// `mailFolder`、`mailFolderChosenAt`、`lastImportAt`、`lastImportNewMails`。
+/// `mailFolder`、`mailFolderChosenAt`、`lastImportAt`、`lastImportNewMails`、
+/// `mailFirstSetupAt`、`autoAnalysisDay`、`autoAnalysisCount`、
+/// `autoAnalysisResumedDay`。
 @DataClassName('AppMetaEntry')
 class AppMeta extends Table {
   TextColumn get key => text()();

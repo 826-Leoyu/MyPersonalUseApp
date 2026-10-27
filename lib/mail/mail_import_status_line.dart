@@ -7,6 +7,7 @@ import '../formatting/date_format.dart';
 import '../planner/day_key.dart';
 import '../planner/planner_exceptions.dart';
 import 'import_status.dart';
+import 'mail_service.dart';
 
 /// "新邮件事项"栏顶部的状态行（spec 0002"界面·状态行"）：最靠前的一条
 /// 提示，有好几条时点开看全部；[立即导入]；找不到文件夹时 [重新选择]；
@@ -18,6 +19,8 @@ class MailImportStatusLine extends ConsumerStatefulWidget {
   static const headlineKey = ValueKey('mail-import-headline');
   static const importNowKey = ValueKey('mail-import-now');
   static const chooseAgainKey = ValueKey('mail-import-choose-again');
+  static const resumeAnalysisKey = ValueKey('mail-analysis-resume');
+  static const retryAnalysisKey = ValueKey('mail-analysis-retry');
 
   /// 打开设置页（没选择文件夹时的"开始设置"）。
   final VoidCallback onOpenSettings;
@@ -73,6 +76,7 @@ class _MailImportStatusLineState extends ConsumerState<MailImportStatusLine> {
                         : null,
                   ),
                 ),
+                if (notices.isNotEmpty) ?_action(notices, 0),
                 if (notices.contains(const FolderMissing()))
                   TextButton(
                     key: MailImportStatusLine.chooseAgainKey,
@@ -88,10 +92,17 @@ class _MailImportStatusLineState extends ConsumerState<MailImportStatusLine> {
               ],
             ),
             if (_expanded && more)
-              for (final line in lines.skip(1))
+              for (final (i, line) in lines.indexed.skip(1))
                 Padding(
                   padding: const EdgeInsets.only(bottom: PlannerTheme.space1),
-                  child: Text(line, style: theme.textTheme.bodySmall),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(line, style: theme.textTheme.bodySmall),
+                      ),
+                      if (i < notices.length) ?_action(notices, i),
+                    ],
+                  ),
                 ),
             Text('这里只能说明电脑上收到了文件，不代表云端流程现在还在正常运行。', style: small),
           ],
@@ -142,7 +153,41 @@ class _MailImportStatusLineState extends ConsumerState<MailImportStatusLine> {
       '⚠ 已 ${ref.read(clockProvider).now().difference(since).inDays} 天没有'
           '新导出文件，请检查 Power Automate 流程',
     PossiblyMissedMails() => '⚠ 可能漏掉了一些邮件，请让设置者手动补读',
+    AnalysisPaused() => '⏸ 今天的新邮件较多，已暂停自动分析',
+    ClaudeNotInstalled() => '⚠ 找不到 Claude Code，请让设置者检查',
+    ClaudeNotLoggedIn() => '⚠ Claude 未登录，请打开 Claude Code 登录',
+    ClaudeQuotaExhausted() => '⏳ Claude 额度已用完，稍后自动重试',
+    AnalysisFailures(:final count) => '⚠ $count 封邮件分析失败',
   };
+
+  /// 第 [index] 条提示旁边的按钮；没有要她做的事时为 null。一个 [重试]
+  /// 会重试所有失败的邮件，所以只放在第一条能重试的提示旁边。
+  Widget? _action(List<ImportNotice> notices, int index) =>
+      switch (notices[index]) {
+        AnalysisPaused() => TextButton(
+          key: MailImportStatusLine.resumeAnalysisKey,
+          onPressed: () => _withService((s) => s.resumeAnalysis()),
+          child: const Text('继续分析'),
+        ),
+        final notice
+            when _retryable(notice) &&
+                notices.indexWhere(_retryable) == index =>
+          TextButton(
+            key: MailImportStatusLine.retryAnalysisKey,
+            onPressed: () => _withService((s) => s.retryAnalysis()),
+            child: const Text('重试'),
+          ),
+        _ => null,
+      };
+
+  static bool _retryable(ImportNotice notice) =>
+      notice is ClaudeNotInstalled ||
+      notice is ClaudeNotLoggedIn ||
+      notice is AnalysisFailures;
+
+  Future<void> _withService(Future<void> Function(MailService) action) async {
+    await action(await ref.read(mailServiceProvider.future));
+  }
 
   String _lastImportText(MailImportStatus status) {
     final at = status.lastImportAt;
