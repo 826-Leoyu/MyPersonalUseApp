@@ -38,6 +38,9 @@ class PlannerService {
   final Clock _clock;
   final String Function() _generateId;
 
+  /// 打开的数据库，给共用同一个数据库的 `MailService`。
+  PlannerDatabase get database => _db;
+
   /// 在 [dayKey] 的画布上新建一张卡片，放在当天所有卡片的最上层。
   Future<TaskCard> createCard(
     DayKey dayKey, {

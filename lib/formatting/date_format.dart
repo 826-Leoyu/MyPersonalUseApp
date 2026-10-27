@@ -34,6 +34,11 @@ String formatShortDate(DayKey day) {
 String formatTimeOfDay(DateTime time) =>
     DateFormat('HH:mm', _locale).format(time.toLocal());
 
+/// 邮件的收件时间，按本地时区显示，例如 `Oct 19 09:15`；不是今年时加年份。
+String formatReceivedTime(DateTime time) =>
+    '${formatShortDate(DayKey.fromDateTime(time.toLocal()))} '
+    '${formatTimeOfDay(time)}';
+
 /// 卡片标题下面的时间行：有截止时间时只显示截止时间，否则显示活动时间，
 /// 例如 `⏰ 截止 Oct 30 23:59`、`📅 活动 Oct 31`。两个都没有时为 null。
 String? formatCardTimeLine(CardTimes times) => switch (times) {

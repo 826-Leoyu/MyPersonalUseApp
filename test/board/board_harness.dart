@@ -41,6 +41,9 @@ class BoardHarness {
   /// 接下来这么多次打开存储都会报错，用来模拟数据库打不开。
   int failingOpens = 0;
 
+  /// 邮件预览里点「导入文件」时选中的文件路径；为 null 时相当于取消选择。
+  String? pickedMailFile;
+
   /// 打开后，App 的所有写入都会报错；读取不受影响。
   set failWrites(bool value) =>
       _failingStorage.writesBeforeFailure = value ? 0 : null;
@@ -158,6 +161,7 @@ class BoardHarness {
     overrides: [
       clockProvider.overrideWithValue(_clock),
       plannerDatabaseFactoryProvider.overrideWithValue(_openDatabase),
+      pickMailExportFileProvider.overrideWithValue(() async => pickedMailFile),
       if (displayedDay case final day?)
         displayedDayProvider.overrideWithBuild((ref, _) => day),
     ],
