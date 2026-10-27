@@ -118,6 +118,7 @@ void main() {
       ]);
     });
 
+    // 只在 Windows 上跑：Linux、macOS 的文件锁只是约定，别的程序照样读得到。
     test('被别的程序锁住、读不出来的文件算正在同步，解锁后导入', () async {
       final path = h.writeFile('mail-1.json', fakeEnvelope([mail('a')]));
       await h.mail.scanFolder();
@@ -132,7 +133,7 @@ void main() {
       locked.closeSync();
       await h.mail.scanFolder();
       expect(await h.subjects(), ['Mail a']);
-    });
+    }, skip: !Platform.isWindows);
   });
 
   group('文件夹（M-35）', () {
