@@ -97,9 +97,16 @@ class MailService {
   static const _mailFolderChosenAtKey = 'mailFolderChosenAt';
   static const _lastImportAtKey = 'lastImportAt';
   static const _lastImportNewMailsKey = 'lastImportNewMails';
+  static const _firstSetupAtKey = 'mailFirstSetupAt';
+  static const _autoAnalysisDayKey = 'autoAnalysisDay';
+  static const _autoAnalysisCountKey = 'autoAnalysisCount';
+  static const _autoAnalysisResumedDayKey = 'autoAnalysisResumedDay';
 
   /// 云端流程每次导出多少封（流程里的 Top）。文件里正好这么多封时算满的。
   static const exportBatchSize = 200;
+
+  /// 首次设置时只自动分析这么久以内收到的邮件，更早的不自动分析。
+  static const firstSetupLookback = Duration(days: 14);
 
   /// 导入以后多久删除导出文件。
   static const keepExportFilesFor = Duration(days: 14);
@@ -112,6 +119,12 @@ class MailService {
 
   /// "可能相关的现有事项"最多给多少条。
   static const maxRelatedItems = 50;
+
+  /// 每个本地日最多自动分析多少封。手动重试不算。
+  static const dailyAutoAnalysisLimit = 100;
+
+  /// 输出格式不对累计多少次以后标为失败。
+  static const maxInvalidOutputs = 3;
 
   final PlannerService _planner;
   final PlannerDatabase _db;
@@ -142,8 +155,8 @@ class MailService {
       fileName: fileName,
       fileModifiedAt: stat.modified.toUtc().millisecondsSinceEpoch,
     );
-    // 新入库的邮件自动分析（M-13），不等分析结束。
-    if (outcome case Imported(newMailCount: > 0)) unawaited(analyzePending());
+    // 导入了文件就分析新入库的邮件（M-13），也重试之前失败的，不等分析结束。
+    if (outcome is Imported) unawaited(analyzePending());
     return outcome;
   }
 
@@ -215,7 +228,16 @@ class MailService {
     }
     await _setMeta(_mailFolderKey, path);
     await _setMeta(_mailFolderChosenAtKey, '$_nowMillis');
+    await _firstSetupAtOrNow();
   });
+
+  /// 首次设置时间：第一次选择邮件文件夹或者第一次导入的时间，之后不再变。
+  /// 还没有时把现在记下来，作为首次设置时间。
+  Future<int> _firstSetupAtOrNow() async {
+    if (await _meta(_firstSetupAtKey) case final at?) return int.parse(at);
+    await _setMeta(_firstSetupAtKey, '$_nowMillis');
+    return _nowMillis;
+  }
 
   /// 解析失败的文件稳定多久以后算格式错误；之前当作还在同步。
   static const invalidAfter = Duration(minutes: 10);
@@ -346,7 +368,7 @@ class MailService {
       });
     }
     await _deleteOldFiles(source);
-    if (newMails > 0) unawaited(analyzePending());
+    if (importedFiles > 0) unawaited(analyzePending());
   }
 
   /// 删除导入超过 14 天、其中的邮件都不再待分析的导出文件。格式错误的文件
@@ -387,8 +409,8 @@ class MailService {
     }
   }
 
-  /// 导入情况的变化：先发出现在的，之后数据库里的导入记录变了、或者扫描
-  /// 结束时再发出。
+  /// 导入和分析情况的变化：先发出现在的，之后数据库里的导入记录、邮件变了，
+  /// 或者扫描结束时再发出。
   Stream<MailImportStatus> watchImportStatus() {
     late final StreamController<MailImportStatus> controller;
     final subscriptions = <StreamSubscription<void>>[];
@@ -406,6 +428,7 @@ class MailService {
                 .tableUpdates(
                   TableUpdateQuery.onAllTables([
                     _db.mailExportFiles,
+                    _db.mails,
                     _db.appMeta,
                   ]),
                 )
@@ -453,6 +476,7 @@ class MailService {
             _nowMillis - lastNewFileAt > noNewFilesAfter.inMilliseconds)
           NoNewFiles(_fromMillis(lastNewFileAt)!),
         if (await _hasGap()) const PossiblyMissedMails(),
+        ...await _analysisNotices(),
       ],
       lastImportAt: _fromMillis(int.tryParse(lastImportAt ?? '')),
       lastImportNewMailCount: int.parse(
@@ -460,6 +484,65 @@ class MailService {
       ),
     );
   });
+
+  /// 分析的情况，按状态行的顺序。
+  Future<List<ImportNotice>> _analysisNotices() async {
+    final count = _db.mails.id.count();
+    final rows =
+        await (_db.selectOnly(_db.mails)
+              ..addColumns([
+                _db.mails.analysisStatus,
+                _db.mails.analysisFailureType,
+                count,
+              ])
+              ..where(
+                _db.mails.analysisStatus.isInValues([
+                  MailAnalysisStatus.pending,
+                  MailAnalysisStatus.failed,
+                ]),
+              )
+              ..groupBy([
+                _db.mails.analysisStatus,
+                _db.mails.analysisFailureType,
+              ]))
+            .get();
+    final pendingFailures = <String?>{};
+    var failed = 0;
+    for (final row in rows) {
+      final status = _db.mails.analysisStatus.converter.fromSql(
+        row.read(_db.mails.analysisStatus)!,
+      );
+      if (status == MailAnalysisStatus.failed) {
+        failed += row.read(count)!;
+      } else {
+        pendingFailures.add(row.read(_db.mails.analysisFailureType));
+      }
+    }
+    bool waiting(AnalysisFailureType type) =>
+        pendingFailures.contains(type.name);
+    // 暂停了、还有邮件在等着自动分析时才算暂停。
+    final paused =
+        await _autoAnalysisPaused() &&
+        await (_db.select(_db.mails)
+                  ..where(
+                    (m) =>
+                        m.analysisStatus.equalsValue(
+                          MailAnalysisStatus.pending,
+                        ) &
+                        _waitsForUser(m).not(),
+                  )
+                  ..limit(1))
+                .getSingleOrNull() !=
+            null;
+    return [
+      if (paused) const AnalysisPaused(),
+      if (waiting(AnalysisFailureType.notInstalled)) const ClaudeNotInstalled(),
+      if (waiting(AnalysisFailureType.notLoggedIn)) const ClaudeNotLoggedIn(),
+      if (waiting(AnalysisFailureType.quotaExhausted))
+        const ClaudeQuotaExhausted(),
+      if (failed > 0) AnalysisFailures(failed),
+    ];
+  }
 
   /// 按收件时间排开所有导入过的文件，有一个文件最早的邮件比它前面所有
   /// 文件最晚的邮件还晚，并且这两个文件都是满的（spec 0002"导入规则·空档
@@ -591,7 +674,11 @@ class MailService {
             importedAt: Value(now),
           ),
         );
+    // 首次设置时间 14 天以前收到的邮件不自动分析（M-21）。
+    final analyzeSince =
+        await _firstSetupAtOrNow() - firstSetupLookback.inMilliseconds;
     for (final mail in newMails) {
+      final receivedAt = mail.receivedAt?.millisecondsSinceEpoch;
       await _db
           .into(_db.mails)
           .insert(
@@ -605,14 +692,16 @@ class MailService {
               subject: mail.subject,
               senderName: Value(mail.senderName),
               senderAddress: Value(mail.senderAddress),
-              receivedAt: Value(mail.receivedAt?.millisecondsSinceEpoch),
+              receivedAt: Value(receivedAt),
               importance: Value(mail.importance),
               hasAttachments: Value(mail.hasAttachments),
               hasInlineImages: Value(mail.body.hasInlineImages),
               bodyText: Value(mail.body.text),
               bodyPossiblyIncomplete: Value(mail.body.possiblyIncomplete),
               links: Value(_encodeLinks(mail.body.links)),
-              analysisStatus: MailAnalysisStatus.pending,
+              analysisStatus: receivedAt != null && receivedAt < analyzeSince
+                  ? MailAnalysisStatus.deferredOld
+                  : MailAnalysisStatus.pending,
               sourceFileId: fileId,
               importedAt: now,
             ),
@@ -651,31 +740,55 @@ class MailService {
   Future<void>? _analysisRun;
   bool _analyzeAgain = false;
 
+  /// 这一轮里分析过的邮件，这一轮里不再分析。
+  final _tried = <String>{};
+
+  /// 点 [重试] 重新变回待分析、还没分析的邮件：不计入每天的上限，暂停时
+  /// 也分析。分析过一次就拿掉；这一轮提前停下时留给下一轮。
+  final _manuallyRetried = <String>{};
+
   /// 分析所有待分析的邮件：一次一封，收件时间新的在前。正在分析时不另开
   /// 一轮，返回正在进行的这一轮，它结束前会再看一遍有没有新的待分析邮件。
   ///
-  /// 一封失败不影响其他邮件，失败的邮件还是待分析，这一轮里不再重试。
-  /// 未安装、未登录、额度用完时后面的邮件也会失败，这一轮直接停下。
-  /// 读写数据库失败时也停下，邮件保持待分析。不会抛出异常。
+  /// 一封失败不影响其他邮件，这一轮里不再重试它（spec 0002"有类型的失败"）：
+  /// 输出格式不对累计 [maxInvalidOutputs] 次后标为失败，其他失败还是待分析。
+  /// 未安装、未登录时要等她处理，之后的自动分析跳过这些邮件。未安装、
+  /// 未登录、额度用完时后面的邮件也会失败，这一轮直接停下。读写数据库失败
+  /// 时也停下，邮件保持待分析。不会抛出异常。
+  ///
+  /// 每个本地日自动分析到 [dailyAutoAnalysisLimit] 封时暂停，直到第二天或者
+  /// [resumeAnalysis]（M-22）。
   Future<void> analyzePending() {
     if (_analyzer == null) return Future.value();
     if (_analysisRun case final running?) {
       _analyzeAgain = true;
       return running;
     }
-    return _analysisRun = _analyzeAll().whenComplete(() => _analysisRun = null);
+    return _analysisRun = _analyzeAll().whenComplete(() {
+      _analysisRun = null;
+      _tried.clear();
+      // 这一轮停下以后才来的请求（导入、[重试]）：再来一轮。
+      if (_analyzeAgain) unawaited(analyzePending());
+    });
   }
 
   Future<void> _analyzeAll() async {
-    final tried = <String>{};
     try {
       do {
         _analyzeAgain = false;
         while (true) {
-          final mail = await _read(() => _nextPending(tried));
+          final paused = await _read(_autoAnalysisPaused);
+          final mail = await _read(
+            () => _nextPending(only: paused ? _manuallyRetried : null),
+          );
           if (mail == null) break;
-          tried.add(mail.id);
-          if (!await _analyzeOne(mail)) return;
+          _tried.add(mail.id);
+          final counts = !_manuallyRetried.remove(mail.id);
+          if (!await _analyzeOne(mail, countsTowardLimit: counts)) {
+            // Claude 现在用不了，这一轮里来的请求再试也一样失败。
+            _analyzeAgain = false;
+            return;
+          }
         }
       } while (_analyzeAgain);
     } catch (_) {
@@ -684,15 +797,92 @@ class MailService {
     }
   }
 
+  /// 今天自动分析了多少封；今天还没分析过时为 0。
+  Future<int> _autoAnalyzedToday() async {
+    if (await _meta(_autoAnalysisDayKey) != '$_today') return 0;
+    return int.parse(await _meta(_autoAnalysisCountKey) ?? '0');
+  }
+
+  Future<void> _countAutoAnalysis() async {
+    final count = await _autoAnalyzedToday();
+    await _setMeta(_autoAnalysisDayKey, '$_today');
+    await _setMeta(_autoAnalysisCountKey, '${count + 1}');
+  }
+
+  /// 今天自动分析到了上限，并且今天没点过 [继续分析]。
+  Future<bool> _autoAnalysisPaused() async =>
+      await _autoAnalyzedToday() >= dailyAutoAnalysisLimit &&
+      await _meta(_autoAnalysisResumedDayKey) != '$_today';
+
+  DayKey get _today => DayKey.fromDateTime(_clock.now());
+
+  /// 状态行上的 [继续分析]：解除今天的暂停，接着分析。写入失败时什么都
+  /// 不变，不会抛出异常。
+  Future<void> resumeAnalysis() async {
+    try {
+      await _write(() => _setMeta(_autoAnalysisResumedDayKey, '$_today'));
+    } on StorageFailure {
+      return;
+    }
+    await analyzePending();
+  }
+
+  /// 状态行上的 [重试]：分析失败的邮件和等着装好、登录 Claude Code 的
+  /// 邮件重新变回待分析，然后马上分析；它们不计入每天的上限，暂停时也
+  /// 分析。额度用完和临时错误的邮件也跟着再试一次，但要计入上限，暂停时
+  /// 不试。写入失败时什么都不变，不会抛出异常。
+  Future<void> retryAnalysis() async {
+    final List<String> ids;
+    try {
+      ids = await _write(() async {
+        final mails = _db.mails;
+        final retried =
+            await (_db.selectOnly(mails)
+                  ..addColumns([mails.id])
+                  ..where(
+                    mails.analysisStatus.equalsValue(
+                          MailAnalysisStatus.failed,
+                        ) |
+                        (mails.analysisStatus.equalsValue(
+                              MailAnalysisStatus.pending,
+                            ) &
+                            _waitsForUser(mails)),
+                  ))
+                .map((row) => row.read(mails.id)!)
+                .get();
+        await (_db.update(mails)..where(
+              (m) => m.analysisStatus.equalsValue(MailAnalysisStatus.failed),
+            ))
+            .write(
+              const MailsCompanion(
+                analysisStatus: Value(MailAnalysisStatus.pending),
+                analysisFailureType: Value(null),
+                analysisFailureCount: Value(0),
+              ),
+            );
+        await _forgetFailures(_userFixableFailures);
+        return retried;
+      });
+    } on StorageFailure {
+      return;
+    }
+    _manuallyRetried.addAll(ids);
+    _tried.removeAll(ids);
+    await analyzePending();
+  }
+
   /// 等正在进行的这一轮分析结束；没有在分析时马上完成。关闭数据库前调用。
   Future<void> waitForAnalysis() => _analysisRun ?? Future.value();
 
-  Future<MailRow?> _nextPending(Set<String> tried) =>
+  /// 下一封要分析的邮件。[only] 不为 null 时只在这些邮件里找。
+  Future<MailRow?> _nextPending({Set<String>? only}) =>
       (_db.select(_db.mails)
             ..where(
               (m) =>
                   m.analysisStatus.equalsValue(MailAnalysisStatus.pending) &
-                  m.id.isNotIn(tried),
+                  _waitsForUser(m).not() &
+                  m.id.isNotIn(_tried) &
+                  (only == null ? const Constant(true) : m.id.isIn(only)),
             )
             ..orderBy([
               (m) => OrderingTerm(
@@ -705,14 +895,45 @@ class MailService {
             ..limit(1))
           .getSingleOrNull();
 
+  /// 没安装或没登录 Claude Code 时失败的邮件：要等她处理，不自动重试。
+  /// 点 [重试]、或者别的邮件分析成功以后才再分析。
+  static Expression<bool> _waitsForUser($MailsTable m) =>
+      m.analysisFailureType.isNotNull() &
+      m.analysisFailureType.isIn(_userFixableFailures);
+
+  static final _userFixableFailures = [
+    AnalysisFailureType.notInstalled.name,
+    AnalysisFailureType.notLoggedIn.name,
+  ];
+
+  /// 待分析的邮件不再记着 [types] 这几种失败。
+  Future<void> _forgetFailures(List<String> types) =>
+      (_db.update(_db.mails)..where(
+            (m) =>
+                m.analysisStatus.equalsValue(MailAnalysisStatus.pending) &
+                m.analysisFailureType.isIn(types),
+          ))
+          .write(const MailsCompanion(analysisFailureType: Value(null)));
+
   /// 分析一封邮件并保存结果。返回这一轮要不要接着分析下一封。
-  Future<bool> _analyzeOne(MailRow mail) async {
+  ///
+  /// [countsTowardLimit] 时，Claude 给出了输出（成功，或者输出格式不对）就
+  /// 计入今天的上限；没用到额度的失败不算。
+  Future<bool> _analyzeOne(
+    MailRow mail, {
+    required bool countsTowardLimit,
+  }) async {
     final request = await _read(() => _requestFor(mail));
     final AnalysisResult result;
     try {
       result = await _analyzer!.analyze(request);
     } on AnalysisFailed catch (e) {
-      await _write(() => _saveFailure(mail.id, e.type));
+      await _write(() async {
+        await _saveFailure(mail.id, e.type);
+        if (countsTowardLimit && e.type == AnalysisFailureType.invalidOutput) {
+          await _countAutoAnalysis();
+        }
+      });
       return switch (e.type) {
         AnalysisFailureType.notInstalled ||
         AnalysisFailureType.notLoggedIn ||
@@ -724,7 +945,10 @@ class MailService {
       await _write(() => _saveFailure(mail.id, AnalysisFailureType.temporary));
       return true;
     }
-    await _write(() => _saveAnalysis(mail, result));
+    await _write(() async {
+      await _saveAnalysis(mail, result);
+      if (countsTowardLimit) await _countAutoAnalysis();
+    });
     return true;
   }
 
@@ -792,14 +1016,24 @@ class MailService {
     return related;
   }
 
+  /// 记下分析失败。失败次数只数输出格式不对，到 [maxInvalidOutputs] 次
+  /// 时标为 `failed`，不再自动重试。
   Future<void> _saveFailure(String mailId, AnalysisFailureType type) async {
     final mail = await (_db.select(
       _db.mails,
     )..where((m) => m.id.equals(mailId))).getSingle();
+    final count = type == AnalysisFailureType.invalidOutput
+        ? mail.analysisFailureCount + 1
+        : mail.analysisFailureCount;
     await (_db.update(_db.mails)..where((m) => m.id.equals(mailId))).write(
       MailsCompanion(
         analysisFailureType: Value(type.name),
-        analysisFailureCount: Value(mail.analysisFailureCount + 1),
+        analysisFailureCount: Value(count),
+        analysisStatus: Value(
+          count >= maxInvalidOutputs
+              ? MailAnalysisStatus.failed
+              : MailAnalysisStatus.pending,
+        ),
       ),
     );
   }
@@ -825,6 +1059,11 @@ class MailService {
                 analyzedAt: Value(now),
               ),
             );
+    // 分析成功说明 Claude Code 装好了、登录了、有额度：等着的邮件接着分析。
+    await _forgetFailures([
+      ..._userFixableFailures,
+      AnalysisFailureType.quotaExhausted.name,
+    ]);
     // 分析期间这封邮件已经不是待分析了：不重复生成事项。
     if (updated == 0 || !result.category.producesCandidates) return;
     for (final item in result.items) {

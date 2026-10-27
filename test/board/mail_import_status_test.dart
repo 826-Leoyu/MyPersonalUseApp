@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:my_personal_use_app/mail/mail_analyzer.dart';
 import 'package:my_personal_use_app/mail/mail_import_status_line.dart';
 import 'package:my_personal_use_app/mail/mail_scan_schedule.dart';
 import 'package:my_personal_use_app/mail/mail_service.dart';
@@ -37,6 +38,12 @@ void main() {
   });
 
   const folder = r'C:\Users\her\OneDrive\DailyNote';
+
+  const informational = AnalysisResult(
+    category: MailCategory.informational,
+    reason: '只是通知',
+    items: [],
+  );
 
   Map<String, Object?> mail(String key, {DateTime? at}) => fakeMessage(
     internetMessageId: '<$key@example.com>',
@@ -161,6 +168,84 @@ void main() {
     expect(find.text('⚠ 可能漏掉了一些邮件，请让设置者手动补读'), findsOneWidget);
     expect(find.text('上次导入：Oct 20 09:01 · 新邮件 400 封'), findsOneWidget);
     await harness.dispose(tester);
+  });
+
+  group('分析的提示（M-20、M-22）', () {
+    windowsTest('额度用完时提示稍后自动重试，30 分钟后自动重试', (tester) async {
+      harness.analyzer.fails('Mail a', AnalysisFailureType.quotaExhausted);
+      drop('mail-1.json', fakeEnvelope([mail('a')]));
+      await harness.seedMailFolder(tester, folder, scans: 2);
+      await harness.launch(tester);
+      expect(headline('⏳ Claude 额度已用完，稍后自动重试'), findsOneWidget);
+
+      harness.analyzer.returns('Mail a', informational);
+      await elapse(tester, const Duration(minutes: 29));
+      expect(headline('⏳ Claude 额度已用完，稍后自动重试'), findsOneWidget);
+
+      await elapse(tester, const Duration(minutes: 1));
+      expect(headline('✅ 上次导入：今天 09:01 · 新邮件 1 封'), findsOneWidget);
+      await harness.dispose(tester);
+    });
+
+    windowsTest('输出格式不对 3 次后提示分析失败，点 [重试] 再分析', (tester) async {
+      harness.analyzer.fails('Mail a', AnalysisFailureType.invalidOutput);
+      drop('mail-1.json', fakeEnvelope([mail('a')]));
+      await harness.seedMailFolder(tester, folder, scans: 2);
+      await harness.launch(tester);
+      await elapse(tester, MailScanSchedule.retryInterval);
+      expect(headline('⚠ 1 封邮件分析失败'), findsOneWidget);
+
+      harness.analyzer.returns('Mail a', informational);
+      await tester.tap(find.byKey(MailImportStatusLine.retryAnalysisKey));
+      await harness.settle(tester);
+
+      expect(harness.analyzer.requests, hasLength(4));
+      expect(find.byKey(MailImportStatusLine.retryAnalysisKey), findsNothing);
+      await harness.dispose(tester);
+    });
+
+    windowsTest('今天自动分析到上限时暂停，点 [继续分析] 接着分析', (tester) async {
+      final limit = MailService.dailyAutoAnalysisLimit;
+      drop(
+        'mail-1.json',
+        fakeEnvelope([
+          for (var i = 0; i <= limit; i++)
+            mail('m$i', at: DateTime.utc(2026, 10, 19, 12, 0, i)),
+        ]),
+      );
+      await harness.seedMailFolder(tester, folder, scans: 2);
+      await harness.launch(tester);
+      expect(headline('⏸ 今天的新邮件较多，已暂停自动分析'), findsOneWidget);
+
+      await tester.tap(find.byKey(MailImportStatusLine.resumeAnalysisKey));
+      await harness.settle(tester);
+
+      expect(harness.analyzer.requests, hasLength(limit + 1));
+      expect(headline('⏸ 今天的新邮件较多，已暂停自动分析'), findsNothing);
+      await harness.dispose(tester);
+    });
+
+    for (final (type, text) in [
+      (AnalysisFailureType.notInstalled, '⚠ 没有找到 Claude Code，请先安装'),
+      (AnalysisFailureType.notLoggedIn, '⚠ Claude 未登录，请打开 Claude Code 登录'),
+    ]) {
+      windowsTest('${type.name}：不自动重试，提示她处理，处理好以后点 [重试]', (tester) async {
+        harness.analyzer.fails('Mail a', type);
+        drop('mail-1.json', fakeEnvelope([mail('a')]));
+        await harness.seedMailFolder(tester, folder, scans: 2);
+        await harness.launch(tester);
+        await elapse(tester, MailScanSchedule.retryInterval);
+        expect(headline(text), findsOneWidget);
+        expect(harness.analyzer.requests, hasLength(1));
+
+        harness.analyzer.returns('Mail a', informational);
+        await tester.tap(find.byKey(MailImportStatusLine.retryAnalysisKey));
+        await harness.settle(tester);
+
+        expect(headline(text), findsNothing);
+        await harness.dispose(tester);
+      });
+    }
   });
 
   group('设置页（M-31）', () {

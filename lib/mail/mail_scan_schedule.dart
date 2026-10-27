@@ -9,19 +9,28 @@ import 'mail_service.dart';
 ///
 /// 一次扫描以后还有刚看到、要等下一次扫描才读的文件时，30 秒后再看一次，
 /// 不用等 5 分钟。
+///
+/// 另外每 30 分钟重试一次分析失败的邮件（spec 0002"有类型的失败"），第二天
+/// 也靠它恢复因为当天上限暂停的自动分析。
 class MailScanSchedule {
   MailScanSchedule(this._service);
 
   static const interval = Duration(minutes: 5);
   static const recheckAfter = Duration(seconds: 30);
+  static const retryInterval = Duration(minutes: 30);
 
   final MailService _service;
   Timer? _periodic;
+  Timer? _retry;
   Timer? _recheck;
   bool _disposed = false;
 
   void start() {
     _periodic = Timer.periodic(interval, (_) => scanNow());
+    _retry = Timer.periodic(
+      retryInterval,
+      (_) => unawaited(_service.analyzePending()),
+    );
     unawaited(scanNow());
   }
 
@@ -44,6 +53,7 @@ class MailScanSchedule {
   void dispose() {
     _disposed = true;
     _periodic?.cancel();
+    _retry?.cancel();
     _recheck?.cancel();
   }
 }
