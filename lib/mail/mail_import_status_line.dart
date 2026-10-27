@@ -140,13 +140,13 @@ class _MailImportStatusLineState extends ConsumerState<MailImportStatusLine> {
       '⚠ 文件 ${fileNames.first} 等 ${fileNames.length} 个文件格式不对（已跳过）',
     NoNewFiles(:final since) =>
       '⚠ 已 ${ref.read(clockProvider).now().difference(since).inDays} 天没有'
-          '新邮件文件，请检查 Power Automate 流程',
+          '新导出文件，请检查 Power Automate 流程',
     PossiblyMissedMails() => '⚠ 可能漏掉了一些邮件，请让设置者手动补读',
   };
 
   String _lastImportText(MailImportStatus status) {
     final at = status.lastImportAt;
-    if (at == null) return '还没有导入过邮件文件';
+    if (at == null) return '还没有导入过导出文件';
     final local = at.toLocal();
     final when = DayKey.fromDateTime(local) == ref.read(todayProvider)
         ? '今天 ${formatTimeOfDay(local)}'

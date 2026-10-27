@@ -251,13 +251,14 @@ class MailService {
       return;
     }
     final rows = {for (final row in await _read(_scanRows)) row.fileName: row};
-    // 还没读过的文件不见了：不再等它。
+    // 还没读过的或格式错误的文件不见了：不再记着它。
     final names = {for (final file in files) file.name};
     final vanished = [
       for (final row in rows.values)
         if (!names.contains(row.fileName) &&
             (row.status == MailExportFileStatus.seen ||
-                row.status == MailExportFileStatus.needsMailbox))
+                row.status == MailExportFileStatus.needsMailbox ||
+                row.status == MailExportFileStatus.invalid))
           row.id,
     ];
     if (vanished.isNotEmpty) {
@@ -435,8 +436,10 @@ class MailService {
       for (final row in rows)
         if (row.status == MailExportFileStatus.invalid) row.fileName,
     ]..sort();
+    // 格式错误的文件不算新文件，它另有提示。
     final lastNewFileAt = [
-      for (final row in rows) row.firstSeenAt,
+      for (final row in rows)
+        if (row.status != MailExportFileStatus.invalid) row.firstSeenAt,
       if (await _meta(_mailFolderChosenAtKey) case final chosen?)
         int.parse(chosen),
     ].fold<int?>(null, (a, b) => a == null || b > a ? b : a);
@@ -458,8 +461,10 @@ class MailService {
     );
   });
 
-  /// 最近导入的文件最早的邮件比之前所有文件最晚的邮件还晚，并且这两个
-  /// 文件都是满的（spec 0002"导入规则·空档检查"）。
+  /// 按收件时间排开所有导入过的文件，有一个文件最早的邮件比它前面所有
+  /// 文件最晚的邮件还晚，并且这两个文件都是满的（spec 0002"导入规则·空档
+  /// 检查"）。后面那个文件导入超过 14 天以后不再算；补读的文件把空档盖住
+  /// 以后也不再算。
   Future<bool> _hasGap() async {
     final files =
         await (_db.select(_db.mailExportFiles)
@@ -472,18 +477,26 @@ class MailService {
                     ]),
               )
               ..orderBy([
-                (f) => OrderingTerm.desc(f.importedAt),
+                (f) => OrderingTerm.asc(f.earliestReceivedAt),
                 (f) => OrderingTerm.desc(f.latestReceivedAt),
               ]))
             .get();
-    if (files.length < 2) return false;
-    final latest = files.first;
-    final previous = files
-        .skip(1)
-        .reduce((a, b) => b.latestReceivedAt! > a.latestReceivedAt! ? b : a);
-    return latest.earliestReceivedAt! > previous.latestReceivedAt! &&
-        latest.mailCount == exportBatchSize &&
-        previous.mailCount == exportBatchSize;
+    final recent = _nowMillis - keepExportFilesFor.inMilliseconds;
+    // 到目前为止收件时间最晚的那个文件。
+    MailExportFileRow? reach;
+    for (final file in files) {
+      if (reach != null &&
+          file.earliestReceivedAt! > reach.latestReceivedAt! &&
+          file.importedAt! >= recent &&
+          file.mailCount == exportBatchSize &&
+          reach.mailCount == exportBatchSize) {
+        return true;
+      }
+      if (reach == null || file.latestReceivedAt! > reach.latestReceivedAt!) {
+        reach = file;
+      }
+    }
+    return false;
   }
 
   /// 扫描邮件文件夹时记下的文件，一个文件名一行。

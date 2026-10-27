@@ -112,8 +112,8 @@ class _MailFolderTileState extends ConsumerState<_MailFolderTile> {
     final folder = ref.watch(mailFolderProvider);
     final check = switch (_check) {
       FolderFound(:final fileCount, latestFileAt: final at?) =>
-        '找到 $fileCount 个邮件文件，最新一个是 ${formatReceivedTime(at)}',
-      FolderFound(:final fileCount) => '找到 $fileCount 个邮件文件',
+        '找到 $fileCount 个导出文件，最新一个是 ${formatReceivedTime(at)}',
+      FolderFound(:final fileCount) => '找到 $fileCount 个导出文件',
       FolderUnavailable() => '这个文件夹打不开，请换一个',
       null => null,
     };

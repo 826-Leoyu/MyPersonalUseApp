@@ -152,12 +152,12 @@ void main() {
     await harness.launch(tester);
 
     expect(headline('⚠ 文件 mail-3.json 格式不对（已跳过）'), findsOneWidget);
-    expect(find.text('⚠ 已 3 天没有新邮件文件，请检查 Power Automate 流程'), findsNothing);
+    expect(find.text('⚠ 已 3 天没有新导出文件，请检查 Power Automate 流程'), findsNothing);
 
     await tester.tap(find.byKey(MailImportStatusLine.headlineKey));
     await harness.settle(tester);
 
-    expect(find.text('⚠ 已 3 天没有新邮件文件，请检查 Power Automate 流程'), findsOneWidget);
+    expect(find.text('⚠ 已 3 天没有新导出文件，请检查 Power Automate 流程'), findsOneWidget);
     expect(find.text('⚠ 可能漏掉了一些邮件，请让设置者手动补读'), findsOneWidget);
     expect(find.text('上次导入：Oct 20 09:01 · 新邮件 400 封'), findsOneWidget);
     await harness.dispose(tester);
@@ -188,7 +188,7 @@ void main() {
       await harness.settle(tester);
 
       expect(find.text(folder), findsOneWidget);
-      expect(find.text('找到 2 个邮件文件，最新一个是 Oct 20 07:01'), findsOneWidget);
+      expect(find.text('找到 2 个导出文件，最新一个是 Oct 20 07:01'), findsOneWidget);
       await tester.pageBack();
       await harness.settle(tester);
       expect(headline('⏳ 有文件正在同步，稍后自动导入'), findsOneWidget);

@@ -168,6 +168,21 @@ void main() {
 
       expect((await h.mail.importStatus()).notices, isEmpty);
     });
+
+    test('格式错误的文件被删掉以后，不再提示格式错误', () async {
+      final path = h.writeFile('mail-1.json', utf8.encode('not json'));
+      await h.mail.scanFolder();
+      h.now = h.now.add(const Duration(minutes: 10));
+      await h.mail.scanFolder();
+      expect((await h.mail.importStatus()).notices, [
+        const FormatErrors(['mail-1.json']),
+      ]);
+      File(path).deleteSync();
+
+      await h.mail.scanFolder();
+
+      expect((await h.mail.importStatus()).notices, isEmpty);
+    });
   });
 
   group('状态行（M-35）', () {
@@ -228,13 +243,30 @@ void main() {
       ]);
     });
 
+    test('格式错误的文件不算有新文件', () async {
+      final chosenAt = h.now;
+      h.now = chosenAt.add(const Duration(days: 1));
+      h.writeFile('mail-1.json', utf8.encode('not json'));
+      await h.mail.scanFolder();
+      h.now = h.now.add(const Duration(minutes: 10));
+      await h.mail.scanFolder();
+
+      h.now = chosenAt.add(const Duration(days: 2, minutes: 1));
+      await h.mail.scanFolder();
+
+      expect(
+        (await h.mail.importStatus()).notices,
+        contains(NoNewFiles(chosenAt.toUtc())),
+      );
+    });
+
     test('多个问题时按状态行的顺序排列', () async {
+      final chosenAt = h.now;
       h.writeFile('mail-1.json', utf8.encode('not json'));
       await h.mail.scanFolder();
       h.now = h.now.add(const Duration(minutes: 10));
       h.writeFile('mail-2.json', utf8.encode('not json either'));
       await h.mail.scanFolder();
-      final secondSeenAt = h.now;
 
       expect((await h.mail.importStatus()).notices, [
         const FilesSyncing(),
@@ -246,7 +278,7 @@ void main() {
 
       expect((await h.mail.importStatus()).notices, [
         const FormatErrors(['mail-1.json', 'mail-2.json']),
-        NoNewFiles(secondSeenAt.toUtc()),
+        NoNewFiles(chosenAt.toUtc()),
       ]);
     });
   });
@@ -272,6 +304,57 @@ void main() {
       expect((await h.mail.importStatus()).notices, [
         const PossiblyMissedMails(),
       ]);
+    });
+
+    test('空档后面又来了正常的文件，提示还在', () async {
+      h.writeFile('mail-1.json', fullFile('a', DateTime.utc(2026, 10, 18)));
+      await h.scanTwice();
+      h.writeFile('mail-2.json', fullFile('b', DateTime.utc(2026, 10, 19)));
+      await h.scanTwice();
+
+      h.writeFile(
+        'mail-3.json',
+        fakeEnvelope([mail('c', at: '2026-10-19T04:00:00Z')]),
+      );
+      await h.scanTwice();
+
+      expect((await h.mail.importStatus()).notices, [
+        const PossiblyMissedMails(),
+      ]);
+    });
+
+    test('一次扫描导入好几个文件时，中间的空档也提示', () async {
+      h.writeFile('mail-1.json', fullFile('a', DateTime.utc(2026, 10, 18)));
+      h.writeFile('mail-2.json', fullFile('b', DateTime.utc(2026, 10, 19)));
+      h.writeFile(
+        'mail-3.json',
+        fakeEnvelope([mail('c', at: '2026-10-19T04:00:00Z')]),
+      );
+      await h.scanTwice();
+
+      expect((await h.mail.importStatus()).notices, [
+        const PossiblyMissedMails(),
+      ]);
+    });
+
+    test('空档后面的文件导入 14 天以后不再提示', () async {
+      h.writeFile('mail-1.json', fullFile('a', DateTime.utc(2026, 10, 18)));
+      await h.scanTwice();
+      h.writeFile('mail-2.json', fullFile('b', DateTime.utc(2026, 10, 19)));
+      await h.scanTwice();
+      final importedAt = h.now;
+
+      h.now = importedAt.add(MailService.keepExportFilesFor);
+      expect(
+        (await h.mail.importStatus()).notices,
+        contains(const PossiblyMissedMails()),
+      );
+
+      h.now = h.now.add(const Duration(minutes: 1));
+      expect(
+        (await h.mail.importStatus()).notices,
+        isNot(contains(const PossiblyMissedMails())),
+      );
     });
 
     test('有重叠时不提示', () async {
