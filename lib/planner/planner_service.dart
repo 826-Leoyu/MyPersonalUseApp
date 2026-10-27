@@ -6,6 +6,7 @@ import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
 import '../storage/planner_database.dart';
+import 'card_time.dart';
 import 'carry_over_layout.dart';
 import 'carry_over_record.dart';
 import 'day_board.dart';
@@ -66,6 +67,8 @@ class PlannerService {
         originalDayKey: dayKey.toString(),
         createdAt: now,
         updatedAt: now,
+        eventTimePending: false,
+        dueTimePending: false,
       );
       await _db.into(_db.taskCards).insert(row);
       return _toCard(row);
@@ -73,21 +76,36 @@ class PlannerService {
   }
 
   /// 修改标题和备注；[note] 为 null 表示没有备注。
+  ///
+  /// 给了 [times] 时一起修改活动时间和截止时间（为 null 的那个清空）；
+  /// 没给时两个时间不变。
   Future<void> updateCardContent(
     String id, {
     required String title,
     required String? note,
+    CardTimes? times,
   }) async {
     final cleanTitle = _validTitle(title);
     if (note != null && note.characters.length > maxNoteLength) {
       throw const InvalidInput('备注最多 $maxNoteLength 个字');
     }
-    await _write(
-      () => _updateCard(
-        id,
-        TaskCardsCompanion(title: Value(cleanTitle), note: Value(note)),
-      ),
+    var changes = TaskCardsCompanion(
+      title: Value(cleanTitle),
+      note: Value(note),
     );
+    if (times != null) {
+      final event = _toColumns(times.event);
+      final due = _toColumns(times.due);
+      changes = changes.copyWith(
+        eventTime: Value(event.value),
+        eventTimePrecision: Value(event.precision),
+        eventTimePending: Value(event.pending),
+        dueTime: Value(due.value),
+        dueTimePrecision: Value(due.precision),
+        dueTimePending: Value(due.pending),
+      );
+    }
+    await _write(() => _updateCard(id, changes));
   }
 
   /// 把卡片移到新位置，并提到当天所有卡片的最上层。
@@ -758,7 +776,42 @@ class PlannerService {
     deletedAt: _fromMillis(row.deletedAt),
     createdAt: _fromMillis(row.createdAt)!,
     updatedAt: _fromMillis(row.updatedAt)!,
+    eventTime: _fromColumns(
+      row.eventTime,
+      row.eventTimePrecision,
+      row.eventTimePending,
+    ),
+    dueTime: _fromColumns(
+      row.dueTime,
+      row.dueTimePrecision,
+      row.dueTimePending,
+    ),
   );
+
+  /// 卡片时间存进三列的值，见 planner_database.dart 开头的说明。
+  static ({String? value, CardTimePrecision? precision, bool pending})
+  _toColumns(CardTime? time) => (
+    value: time?.time?.toIso8601String() ?? time?.day?.toString(),
+    precision: time?.precision,
+    pending: time?.pending ?? false,
+  );
+
+  /// 从三列读回卡片时间；没有值也不待确认时为 null。
+  static CardTime? _fromColumns(
+    String? value,
+    CardTimePrecision? precision,
+    bool pending,
+  ) => switch ((value, precision)) {
+    (final value?, CardTimePrecision.dateTime) => CardTime.dateTime(
+      DateTime.parse(value),
+      pending: pending,
+    ),
+    (final value?, CardTimePrecision.date) => CardTime.date(
+      DayKey.parse(value),
+      pending: pending,
+    ),
+    _ => pending ? const CardTime.pending() : null,
+  };
 
   static Link _toLink(LinkRow row) => Link(
     id: row.id,

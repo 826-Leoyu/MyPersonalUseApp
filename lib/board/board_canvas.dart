@@ -11,9 +11,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/planner_theme.dart';
 import '../app/providers.dart';
+import '../formatting/date_format.dart';
 import '../planner/card_colors.dart';
+import '../planner/card_time.dart';
 import '../planner/carry_over_record.dart';
 import '../planner/day_board.dart';
+import '../planner/day_key.dart';
 import '../planner/link_geometry.dart';
 import '../planner/planner_exceptions.dart';
 import '../planner/planner_service.dart';
@@ -70,6 +73,10 @@ class BoardCanvas extends ConsumerStatefulWidget {
   /// 选中的卡片右下角调整大小的手柄的 key。
   static Key resizeHandleKey(String cardId) =>
       ValueKey('resize-handle-$cardId');
+
+  /// 编辑卡片时「活动时间」「截止时间」两行的 key。
+  static const eventTimeEditorKey = ValueKey('event-time-editor');
+  static const dueTimeEditorKey = ValueKey('due-time-editor');
 
   /// 拖着卡片停在另一张没连上的卡片上时，虚线连线预览的 key。
   static const linkPreviewKey = ValueKey('link-preview');
@@ -1116,8 +1123,11 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
                       child: _CardFrame(
                         colorArgb: TaskCard.defaultColorArgb,
                         outlined: true,
-                        builder: (textColor) =>
-                            _CardEditor(editing: draft, textColor: textColor),
+                        builder: (textColor) => _CardEditor(
+                          editing: draft,
+                          day: ref.read(displayedDayProvider),
+                          textColor: textColor,
+                        ),
                       ),
                     ),
                   ),
@@ -1446,6 +1456,7 @@ class _CardViewState extends State<_CardView> {
                   final content = switch (editing) {
                     final editing? => _CardEditor(
                       editing: editing,
+                      day: card.dayKey,
                       textColor: textColor,
                     ),
                     null => _CardContent(card: card, textColor: textColor),
@@ -1542,8 +1553,12 @@ class _Leaving {
   bool gone = false;
 }
 
-/// 卡片上显示的内容：标题自动换行，超出卡片高度时省略；下面是备注的
-/// 第一个非空行，单行省略，字号小一号、颜色淡一些；没有备注时不显示。
+/// 卡片上显示的内容：标题自动换行，超出卡片高度时省略；下面是时间行（见
+/// [formatCardTimeLine]），再下面是备注的第一个非空行，两者都单行省略，
+/// 字号小一号、颜色淡一些；没有时间、没有备注时不显示。
+///
+/// 卡片太矮、时间行和备注放不下时，先不显示备注，再不显示时间。标题占用
+/// 剩下的高度（和没有时间行时一样，可能不满一行）。
 class _CardContent extends StatelessWidget {
   const _CardContent({required this.card, required this.textColor});
 
@@ -1562,28 +1577,51 @@ class _CardContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    final noteLine = _firstNoteLine(card.note);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Flexible(
-          child: _HeightLimitedText(
-            card.title,
-            style: textTheme.bodyLarge?.copyWith(color: textColor),
-          ),
-        ),
-        if (noteLine != null)
-          Text(
-            noteLine,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: textTheme.bodyMedium?.copyWith(
-              color: textColor.withValues(alpha: 0.6),
-            ),
-          ),
-      ],
+    final titleStyle = textTheme.bodyLarge?.copyWith(color: textColor);
+    final secondaryStyle = textTheme.bodyMedium?.copyWith(
+      color: textColor.withValues(alpha: 0.6),
+    );
+    final timeLine = formatCardTimeLine((
+      event: card.eventTime,
+      due: card.dueTime,
+    ));
+    final lines = [?timeLine, ?_firstNoteLine(card.note)];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        var shown = lines.length;
+        if (constraints.maxHeight.isFinite) {
+          final fits =
+              constraints.maxHeight ~/ _lineHeight(context, secondaryStyle);
+          shown = math.min(shown, fits);
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Flexible(child: _HeightLimitedText(card.title, style: titleStyle)),
+            for (final line in lines.take(shown))
+              Text(
+                line,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: secondaryStyle,
+              ),
+          ],
+        );
+      },
     );
   }
+}
+
+/// 用 [style] 显示一行文字的高度。
+double _lineHeight(BuildContext context, TextStyle? style) {
+  final line = TextPainter(
+    text: TextSpan(text: ' ', style: style),
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+  );
+  final height = line.preferredLineHeight;
+  line.dispose();
+  return height;
 }
 
 /// 自动换行的文字，行数以能放下的高度为限，超出的部分用省略号。
@@ -1597,13 +1635,7 @@ class _HeightLimitedText extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final line = TextPainter(
-          text: TextSpan(text: text, style: style),
-          textDirection: Directionality.of(context),
-          textScaler: MediaQuery.textScalerOf(context),
-        );
-        final lineHeight = line.preferredLineHeight;
-        line.dispose();
+        final lineHeight = _lineHeight(context, style);
         final maxLines = constraints.maxHeight.isFinite
             ? math.max(1, (constraints.maxHeight / lineHeight).floor())
             : null;
@@ -1720,11 +1752,19 @@ class _CardFrame extends StatelessWidget {
   }
 }
 
-/// 卡片上的标题和备注编辑框。输入的内容随时写回 [editing]。
+/// 卡片上的编辑框：标题、备注，下面是「活动时间」「截止时间」两行。
+/// 改的内容随时写回 [editing]。
 class _CardEditor extends StatefulWidget {
-  const _CardEditor({required this.editing, required this.textColor});
+  const _CardEditor({
+    required this.editing,
+    required this.day,
+    required this.textColor,
+  });
 
   final Editing editing;
+
+  /// 卡片所在的那一天（新卡片是正在显示的那一天）：选日期时从这天开始。
+  final DayKey day;
   final Color textColor;
 
   @override
@@ -1747,6 +1787,7 @@ class _CardEditorState extends State<_CardEditor> {
     final textTheme = Theme.of(context).textTheme;
     final textColor = widget.textColor;
     final hintStyle = TextStyle(color: textColor.withValues(alpha: 0.5));
+    final editing = widget.editing;
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1763,7 +1804,7 @@ class _CardEditorState extends State<_CardEditor> {
               hintText: '标题',
               hintStyle: hintStyle,
             ),
-            onChanged: (value) => widget.editing.title = value,
+            onChanged: (value) => editing.title = value,
           ),
           const SizedBox(height: 4),
           TextField(
@@ -1777,10 +1818,142 @@ class _CardEditorState extends State<_CardEditor> {
               hintText: '备注',
               hintStyle: hintStyle,
             ),
-            onChanged: (value) => widget.editing.note = value,
+            onChanged: (value) => editing.note = value,
+          ),
+          const SizedBox(height: 4),
+          _CardTimeEditor(
+            key: BoardCanvas.eventTimeEditorKey,
+            label: '活动时间',
+            time: editing.eventTime,
+            day: widget.day,
+            defaultTimeOfDay: const TimeOfDay(hour: 9, minute: 0),
+            textColor: textColor,
+            onChanged: (time) => setState(() => editing.eventTime = time),
+          ),
+          _CardTimeEditor(
+            key: BoardCanvas.dueTimeEditorKey,
+            label: '截止时间',
+            time: editing.dueTime,
+            day: widget.day,
+            defaultTimeOfDay: const TimeOfDay(hour: 23, minute: 59),
+            textColor: textColor,
+            onChanged: (time) => setState(() => editing.dueTime = time),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 编辑框里的一个卡片时间：标签和当前的值（点它选日期），有日期时可以
+/// 选时刻，有值或待确认时可以清空。待确认显示 ⚠。
+class _CardTimeEditor extends StatelessWidget {
+  const _CardTimeEditor({
+    super.key,
+    required this.label,
+    required this.time,
+    required this.day,
+    required this.defaultTimeOfDay,
+    required this.textColor,
+    required this.onChanged,
+  });
+
+  final String label;
+  final CardTime? time;
+
+  /// 还没有日期时，日期选择器从这天开始。
+  final DayKey day;
+
+  /// 还没有时刻时，时刻选择器从这个时刻开始。
+  final TimeOfDay defaultTimeOfDay;
+  final Color textColor;
+  final ValueChanged<CardTime?> onChanged;
+
+  /// 有时刻时按本地时区的时间。
+  DateTime? get _localTime => time?.time?.toLocal();
+
+  /// 选日期：有时刻时保留原来的时刻。选了就不再待确认。
+  Future<void> _pickDate(BuildContext context) async {
+    final initial = time?.localDay ?? day;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime(initial.year, initial.month, initial.day),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100, 12, 31),
+    );
+    if (picked == null) return;
+    final pickedDay = DayKey(picked.year, picked.month, picked.day);
+    onChanged(switch (_localTime) {
+      final at? => CardTime.dateTime(
+        DateTime(picked.year, picked.month, picked.day, at.hour, at.minute),
+      ),
+      null => CardTime.date(pickedDay),
+    });
+  }
+
+  /// 给已有的日期选时刻。选了就不再待确认。
+  Future<void> _pickTime(BuildContext context, DayKey day) async {
+    final at = _localTime;
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: at == null ? defaultTimeOfDay : TimeOfDay.fromDateTime(at),
+    );
+    if (picked == null) return;
+    onChanged(
+      CardTime.dateTime(
+        DateTime(day.year, day.month, day.day, picked.hour, picked.minute),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final mutedColor = textColor.withValues(alpha: 0.6);
+    final time = this.time;
+    final day = time?.localDay;
+    Widget button(IconData icon, String tooltip, VoidCallback onPressed) =>
+        IconButton(
+          icon: Icon(icon, size: 16),
+          tooltip: tooltip,
+          color: mutedColor,
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+          onPressed: onPressed,
+        );
+    return Row(
+      children: [
+        Expanded(
+          child: Tooltip(
+            message: '选择日期',
+            child: InkWell(
+              borderRadius: PlannerTheme.tagRadius,
+              onTap: () => _pickDate(context),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: textTheme.labelSmall?.copyWith(color: mutedColor),
+                  ),
+                  Text(
+                    time == null ? '选日期' : formatCardTime(time),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: textTheme.bodySmall?.copyWith(
+                      color: time == null ? mutedColor : textColor,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (day != null)
+          button(Icons.schedule, '选择时刻', () => _pickTime(context, day)),
+        if (time != null) button(Icons.close, '清空', () => onChanged(null)),
+      ],
     );
   }
 }

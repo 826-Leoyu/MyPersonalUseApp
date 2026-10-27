@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
 import 'package:my_personal_use_app/formatting/date_format.dart';
+import 'package:my_personal_use_app/planner/card_time.dart';
 import 'package:my_personal_use_app/planner/day_key.dart';
 
 void main() {
@@ -118,6 +119,56 @@ void main() {
 
       expect(label.date, 'Nov 1');
       expect(label.weekday, 'Sun');
+    });
+  });
+
+  group('卡片时间行', () {
+    final inOct2026 = Clock.fixed(DateTime(2026, 10, 20, 9));
+    String? line({CardTime? event, CardTime? due}) => withClock(
+      inOct2026,
+      () => formatCardTimeLine((event: event, due: due)),
+    );
+
+    test('没有时间时没有时间行', () {
+      expect(line(), isNull);
+    });
+
+    test('只有活动时间时显示活动时间，按本地时区显示时刻', () {
+      final event = CardTime.dateTime(DateTime(2026, 10, 31, 14));
+
+      expect(line(event: event), '📅 活动 Oct 31 14:00');
+    });
+
+    test('有截止时间时只显示截止时间', () {
+      final event = CardTime.dateTime(DateTime(2026, 10, 31, 14));
+      final due = CardTime.dateTime(DateTime(2026, 10, 30, 23, 59));
+
+      expect(line(event: event, due: due), '⏰ 截止 Oct 30 23:59');
+    });
+
+    test('只有日期时不显示时刻', () {
+      expect(line(due: CardTime.date(DayKey(2026, 10, 30))), '⏰ 截止 Oct 30');
+    });
+
+    test('不是今年的日期加年份', () {
+      expect(
+        line(event: CardTime.date(DayKey(2027, 1, 3))),
+        '📅 活动 Jan 3, 2027',
+      );
+    });
+
+    test('待确认显示 ⚠，有暂定的值时也显示出来', () {
+      expect(line(due: const CardTime.pending()), '⏰ 截止 ⚠ 待确认');
+      expect(
+        line(due: CardTime.date(DayKey(2026, 10, 30), pending: true)),
+        '⏰ 截止 Oct 30 ⚠ 待确认',
+      );
+    });
+
+    test('截止时间待确认时仍然只显示截止时间', () {
+      final event = CardTime.date(DayKey(2026, 10, 31));
+
+      expect(line(event: event, due: const CardTime.pending()), '⏰ 截止 ⚠ 待确认');
     });
   });
 }

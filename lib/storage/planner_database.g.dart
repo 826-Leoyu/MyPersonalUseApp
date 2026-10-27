@@ -179,6 +179,82 @@ class $TaskCardsTable extends TaskCards
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _eventTimeMeta = const VerificationMeta(
+    'eventTime',
+  );
+  @override
+  late final GeneratedColumn<String> eventTime = GeneratedColumn<String>(
+    'event_time',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  late final GeneratedColumnWithTypeConverter<CardTimePrecision?, String>
+  eventTimePrecision =
+      GeneratedColumn<String>(
+        'event_time_precision',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      ).withConverter<CardTimePrecision?>(
+        $TaskCardsTable.$convertereventTimePrecisionn,
+      );
+  static const VerificationMeta _eventTimePendingMeta = const VerificationMeta(
+    'eventTimePending',
+  );
+  @override
+  late final GeneratedColumn<bool> eventTimePending = GeneratedColumn<bool>(
+    'event_time_pending',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("event_time_pending" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _dueTimeMeta = const VerificationMeta(
+    'dueTime',
+  );
+  @override
+  late final GeneratedColumn<String> dueTime = GeneratedColumn<String>(
+    'due_time',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  late final GeneratedColumnWithTypeConverter<CardTimePrecision?, String>
+  dueTimePrecision =
+      GeneratedColumn<String>(
+        'due_time_precision',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      ).withConverter<CardTimePrecision?>(
+        $TaskCardsTable.$converterdueTimePrecisionn,
+      );
+  static const VerificationMeta _dueTimePendingMeta = const VerificationMeta(
+    'dueTimePending',
+  );
+  @override
+  late final GeneratedColumn<bool> dueTimePending = GeneratedColumn<bool>(
+    'due_time_pending',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("due_time_pending" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -198,6 +274,12 @@ class $TaskCardsTable extends TaskCards
     deletedAt,
     createdAt,
     updatedAt,
+    eventTime,
+    eventTimePrecision,
+    eventTimePending,
+    dueTime,
+    dueTimePrecision,
+    dueTimePending,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -333,6 +415,36 @@ class $TaskCardsTable extends TaskCards
     } else if (isInserting) {
       context.missing(_updatedAtMeta);
     }
+    if (data.containsKey('event_time')) {
+      context.handle(
+        _eventTimeMeta,
+        eventTime.isAcceptableOrUnknown(data['event_time']!, _eventTimeMeta),
+      );
+    }
+    if (data.containsKey('event_time_pending')) {
+      context.handle(
+        _eventTimePendingMeta,
+        eventTimePending.isAcceptableOrUnknown(
+          data['event_time_pending']!,
+          _eventTimePendingMeta,
+        ),
+      );
+    }
+    if (data.containsKey('due_time')) {
+      context.handle(
+        _dueTimeMeta,
+        dueTime.isAcceptableOrUnknown(data['due_time']!, _dueTimeMeta),
+      );
+    }
+    if (data.containsKey('due_time_pending')) {
+      context.handle(
+        _dueTimePendingMeta,
+        dueTimePending.isAcceptableOrUnknown(
+          data['due_time_pending']!,
+          _dueTimePendingMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -412,6 +524,34 @@ class $TaskCardsTable extends TaskCards
         DriftSqlType.int,
         data['${effectivePrefix}updated_at'],
       )!,
+      eventTime: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}event_time'],
+      ),
+      eventTimePrecision: $TaskCardsTable.$convertereventTimePrecisionn.fromSql(
+        attachedDatabase.typeMapping.read(
+          DriftSqlType.string,
+          data['${effectivePrefix}event_time_precision'],
+        ),
+      ),
+      eventTimePending: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}event_time_pending'],
+      )!,
+      dueTime: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}due_time'],
+      ),
+      dueTimePrecision: $TaskCardsTable.$converterdueTimePrecisionn.fromSql(
+        attachedDatabase.typeMapping.read(
+          DriftSqlType.string,
+          data['${effectivePrefix}due_time_precision'],
+        ),
+      ),
+      dueTimePending: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}due_time_pending'],
+      )!,
     );
   }
 
@@ -422,6 +562,22 @@ class $TaskCardsTable extends TaskCards
 
   static JsonTypeConverter2<CardStatus, String, String> $converterstatus =
       const EnumNameConverter<CardStatus>(CardStatus.values);
+  static JsonTypeConverter2<CardTimePrecision, String, String>
+  $convertereventTimePrecision = const EnumNameConverter<CardTimePrecision>(
+    CardTimePrecision.values,
+  );
+  static JsonTypeConverter2<CardTimePrecision?, String?, String?>
+  $convertereventTimePrecisionn = JsonTypeConverter2.asNullable(
+    $convertereventTimePrecision,
+  );
+  static JsonTypeConverter2<CardTimePrecision, String, String>
+  $converterdueTimePrecision = const EnumNameConverter<CardTimePrecision>(
+    CardTimePrecision.values,
+  );
+  static JsonTypeConverter2<CardTimePrecision?, String?, String?>
+  $converterdueTimePrecisionn = JsonTypeConverter2.asNullable(
+    $converterdueTimePrecision,
+  );
 }
 
 class TaskCardRow extends DataClass implements Insertable<TaskCardRow> {
@@ -442,6 +598,12 @@ class TaskCardRow extends DataClass implements Insertable<TaskCardRow> {
   final int? deletedAt;
   final int createdAt;
   final int updatedAt;
+  final String? eventTime;
+  final CardTimePrecision? eventTimePrecision;
+  final bool eventTimePending;
+  final String? dueTime;
+  final CardTimePrecision? dueTimePrecision;
+  final bool dueTimePending;
   const TaskCardRow({
     required this.id,
     required this.dayKey,
@@ -460,6 +622,12 @@ class TaskCardRow extends DataClass implements Insertable<TaskCardRow> {
     this.deletedAt,
     required this.createdAt,
     required this.updatedAt,
+    this.eventTime,
+    this.eventTimePrecision,
+    required this.eventTimePending,
+    this.dueTime,
+    this.dueTimePrecision,
+    required this.dueTimePending,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -491,6 +659,24 @@ class TaskCardRow extends DataClass implements Insertable<TaskCardRow> {
     }
     map['created_at'] = Variable<int>(createdAt);
     map['updated_at'] = Variable<int>(updatedAt);
+    if (!nullToAbsent || eventTime != null) {
+      map['event_time'] = Variable<String>(eventTime);
+    }
+    if (!nullToAbsent || eventTimePrecision != null) {
+      map['event_time_precision'] = Variable<String>(
+        $TaskCardsTable.$convertereventTimePrecisionn.toSql(eventTimePrecision),
+      );
+    }
+    map['event_time_pending'] = Variable<bool>(eventTimePending);
+    if (!nullToAbsent || dueTime != null) {
+      map['due_time'] = Variable<String>(dueTime);
+    }
+    if (!nullToAbsent || dueTimePrecision != null) {
+      map['due_time_precision'] = Variable<String>(
+        $TaskCardsTable.$converterdueTimePrecisionn.toSql(dueTimePrecision),
+      );
+    }
+    map['due_time_pending'] = Variable<bool>(dueTimePending);
     return map;
   }
 
@@ -517,6 +703,20 @@ class TaskCardRow extends DataClass implements Insertable<TaskCardRow> {
           : Value(deletedAt),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
+      eventTime: eventTime == null && nullToAbsent
+          ? const Value.absent()
+          : Value(eventTime),
+      eventTimePrecision: eventTimePrecision == null && nullToAbsent
+          ? const Value.absent()
+          : Value(eventTimePrecision),
+      eventTimePending: Value(eventTimePending),
+      dueTime: dueTime == null && nullToAbsent
+          ? const Value.absent()
+          : Value(dueTime),
+      dueTimePrecision: dueTimePrecision == null && nullToAbsent
+          ? const Value.absent()
+          : Value(dueTimePrecision),
+      dueTimePending: Value(dueTimePending),
     );
   }
 
@@ -545,6 +745,15 @@ class TaskCardRow extends DataClass implements Insertable<TaskCardRow> {
       deletedAt: serializer.fromJson<int?>(json['deletedAt']),
       createdAt: serializer.fromJson<int>(json['createdAt']),
       updatedAt: serializer.fromJson<int>(json['updatedAt']),
+      eventTime: serializer.fromJson<String?>(json['eventTime']),
+      eventTimePrecision: $TaskCardsTable.$convertereventTimePrecisionn
+          .fromJson(serializer.fromJson<String?>(json['eventTimePrecision'])),
+      eventTimePending: serializer.fromJson<bool>(json['eventTimePending']),
+      dueTime: serializer.fromJson<String?>(json['dueTime']),
+      dueTimePrecision: $TaskCardsTable.$converterdueTimePrecisionn.fromJson(
+        serializer.fromJson<String?>(json['dueTimePrecision']),
+      ),
+      dueTimePending: serializer.fromJson<bool>(json['dueTimePending']),
     );
   }
   @override
@@ -570,6 +779,18 @@ class TaskCardRow extends DataClass implements Insertable<TaskCardRow> {
       'deletedAt': serializer.toJson<int?>(deletedAt),
       'createdAt': serializer.toJson<int>(createdAt),
       'updatedAt': serializer.toJson<int>(updatedAt),
+      'eventTime': serializer.toJson<String?>(eventTime),
+      'eventTimePrecision': serializer.toJson<String?>(
+        $TaskCardsTable.$convertereventTimePrecisionn.toJson(
+          eventTimePrecision,
+        ),
+      ),
+      'eventTimePending': serializer.toJson<bool>(eventTimePending),
+      'dueTime': serializer.toJson<String?>(dueTime),
+      'dueTimePrecision': serializer.toJson<String?>(
+        $TaskCardsTable.$converterdueTimePrecisionn.toJson(dueTimePrecision),
+      ),
+      'dueTimePending': serializer.toJson<bool>(dueTimePending),
     };
   }
 
@@ -591,6 +812,12 @@ class TaskCardRow extends DataClass implements Insertable<TaskCardRow> {
     Value<int?> deletedAt = const Value.absent(),
     int? createdAt,
     int? updatedAt,
+    Value<String?> eventTime = const Value.absent(),
+    Value<CardTimePrecision?> eventTimePrecision = const Value.absent(),
+    bool? eventTimePending,
+    Value<String?> dueTime = const Value.absent(),
+    Value<CardTimePrecision?> dueTimePrecision = const Value.absent(),
+    bool? dueTimePending,
   }) => TaskCardRow(
     id: id ?? this.id,
     dayKey: dayKey ?? this.dayKey,
@@ -609,6 +836,16 @@ class TaskCardRow extends DataClass implements Insertable<TaskCardRow> {
     deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
+    eventTime: eventTime.present ? eventTime.value : this.eventTime,
+    eventTimePrecision: eventTimePrecision.present
+        ? eventTimePrecision.value
+        : this.eventTimePrecision,
+    eventTimePending: eventTimePending ?? this.eventTimePending,
+    dueTime: dueTime.present ? dueTime.value : this.dueTime,
+    dueTimePrecision: dueTimePrecision.present
+        ? dueTimePrecision.value
+        : this.dueTimePrecision,
+    dueTimePending: dueTimePending ?? this.dueTimePending,
   );
   TaskCardRow copyWithCompanion(TaskCardsCompanion data) {
     return TaskCardRow(
@@ -635,6 +872,20 @@ class TaskCardRow extends DataClass implements Insertable<TaskCardRow> {
       deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      eventTime: data.eventTime.present ? data.eventTime.value : this.eventTime,
+      eventTimePrecision: data.eventTimePrecision.present
+          ? data.eventTimePrecision.value
+          : this.eventTimePrecision,
+      eventTimePending: data.eventTimePending.present
+          ? data.eventTimePending.value
+          : this.eventTimePending,
+      dueTime: data.dueTime.present ? data.dueTime.value : this.dueTime,
+      dueTimePrecision: data.dueTimePrecision.present
+          ? data.dueTimePrecision.value
+          : this.dueTimePrecision,
+      dueTimePending: data.dueTimePending.present
+          ? data.dueTimePending.value
+          : this.dueTimePending,
     );
   }
 
@@ -657,13 +908,19 @@ class TaskCardRow extends DataClass implements Insertable<TaskCardRow> {
           ..write('originalDayKey: $originalDayKey, ')
           ..write('deletedAt: $deletedAt, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('eventTime: $eventTime, ')
+          ..write('eventTimePrecision: $eventTimePrecision, ')
+          ..write('eventTimePending: $eventTimePending, ')
+          ..write('dueTime: $dueTime, ')
+          ..write('dueTimePrecision: $dueTimePrecision, ')
+          ..write('dueTimePending: $dueTimePending')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     id,
     dayKey,
     title,
@@ -681,7 +938,13 @@ class TaskCardRow extends DataClass implements Insertable<TaskCardRow> {
     deletedAt,
     createdAt,
     updatedAt,
-  );
+    eventTime,
+    eventTimePrecision,
+    eventTimePending,
+    dueTime,
+    dueTimePrecision,
+    dueTimePending,
+  ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -702,7 +965,13 @@ class TaskCardRow extends DataClass implements Insertable<TaskCardRow> {
           other.originalDayKey == this.originalDayKey &&
           other.deletedAt == this.deletedAt &&
           other.createdAt == this.createdAt &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.eventTime == this.eventTime &&
+          other.eventTimePrecision == this.eventTimePrecision &&
+          other.eventTimePending == this.eventTimePending &&
+          other.dueTime == this.dueTime &&
+          other.dueTimePrecision == this.dueTimePrecision &&
+          other.dueTimePending == this.dueTimePending);
 }
 
 class TaskCardsCompanion extends UpdateCompanion<TaskCardRow> {
@@ -723,6 +992,12 @@ class TaskCardsCompanion extends UpdateCompanion<TaskCardRow> {
   final Value<int?> deletedAt;
   final Value<int> createdAt;
   final Value<int> updatedAt;
+  final Value<String?> eventTime;
+  final Value<CardTimePrecision?> eventTimePrecision;
+  final Value<bool> eventTimePending;
+  final Value<String?> dueTime;
+  final Value<CardTimePrecision?> dueTimePrecision;
+  final Value<bool> dueTimePending;
   final Value<int> rowid;
   const TaskCardsCompanion({
     this.id = const Value.absent(),
@@ -742,6 +1017,12 @@ class TaskCardsCompanion extends UpdateCompanion<TaskCardRow> {
     this.deletedAt = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.eventTime = const Value.absent(),
+    this.eventTimePrecision = const Value.absent(),
+    this.eventTimePending = const Value.absent(),
+    this.dueTime = const Value.absent(),
+    this.dueTimePrecision = const Value.absent(),
+    this.dueTimePending = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   TaskCardsCompanion.insert({
@@ -762,6 +1043,12 @@ class TaskCardsCompanion extends UpdateCompanion<TaskCardRow> {
     this.deletedAt = const Value.absent(),
     required int createdAt,
     required int updatedAt,
+    this.eventTime = const Value.absent(),
+    this.eventTimePrecision = const Value.absent(),
+    this.eventTimePending = const Value.absent(),
+    this.dueTime = const Value.absent(),
+    this.dueTimePrecision = const Value.absent(),
+    this.dueTimePending = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        dayKey = Value(dayKey),
@@ -795,6 +1082,12 @@ class TaskCardsCompanion extends UpdateCompanion<TaskCardRow> {
     Expression<int>? deletedAt,
     Expression<int>? createdAt,
     Expression<int>? updatedAt,
+    Expression<String>? eventTime,
+    Expression<String>? eventTimePrecision,
+    Expression<bool>? eventTimePending,
+    Expression<String>? dueTime,
+    Expression<String>? dueTimePrecision,
+    Expression<bool>? dueTimePending,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -815,6 +1108,13 @@ class TaskCardsCompanion extends UpdateCompanion<TaskCardRow> {
       if (deletedAt != null) 'deleted_at': deletedAt,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (eventTime != null) 'event_time': eventTime,
+      if (eventTimePrecision != null)
+        'event_time_precision': eventTimePrecision,
+      if (eventTimePending != null) 'event_time_pending': eventTimePending,
+      if (dueTime != null) 'due_time': dueTime,
+      if (dueTimePrecision != null) 'due_time_precision': dueTimePrecision,
+      if (dueTimePending != null) 'due_time_pending': dueTimePending,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -837,6 +1137,12 @@ class TaskCardsCompanion extends UpdateCompanion<TaskCardRow> {
     Value<int?>? deletedAt,
     Value<int>? createdAt,
     Value<int>? updatedAt,
+    Value<String?>? eventTime,
+    Value<CardTimePrecision?>? eventTimePrecision,
+    Value<bool>? eventTimePending,
+    Value<String?>? dueTime,
+    Value<CardTimePrecision?>? dueTimePrecision,
+    Value<bool>? dueTimePending,
     Value<int>? rowid,
   }) {
     return TaskCardsCompanion(
@@ -857,6 +1163,12 @@ class TaskCardsCompanion extends UpdateCompanion<TaskCardRow> {
       deletedAt: deletedAt ?? this.deletedAt,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      eventTime: eventTime ?? this.eventTime,
+      eventTimePrecision: eventTimePrecision ?? this.eventTimePrecision,
+      eventTimePending: eventTimePending ?? this.eventTimePending,
+      dueTime: dueTime ?? this.dueTime,
+      dueTimePrecision: dueTimePrecision ?? this.dueTimePrecision,
+      dueTimePending: dueTimePending ?? this.dueTimePending,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -917,6 +1229,32 @@ class TaskCardsCompanion extends UpdateCompanion<TaskCardRow> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<int>(updatedAt.value);
     }
+    if (eventTime.present) {
+      map['event_time'] = Variable<String>(eventTime.value);
+    }
+    if (eventTimePrecision.present) {
+      map['event_time_precision'] = Variable<String>(
+        $TaskCardsTable.$convertereventTimePrecisionn.toSql(
+          eventTimePrecision.value,
+        ),
+      );
+    }
+    if (eventTimePending.present) {
+      map['event_time_pending'] = Variable<bool>(eventTimePending.value);
+    }
+    if (dueTime.present) {
+      map['due_time'] = Variable<String>(dueTime.value);
+    }
+    if (dueTimePrecision.present) {
+      map['due_time_precision'] = Variable<String>(
+        $TaskCardsTable.$converterdueTimePrecisionn.toSql(
+          dueTimePrecision.value,
+        ),
+      );
+    }
+    if (dueTimePending.present) {
+      map['due_time_pending'] = Variable<bool>(dueTimePending.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -943,6 +1281,12 @@ class TaskCardsCompanion extends UpdateCompanion<TaskCardRow> {
           ..write('deletedAt: $deletedAt, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
+          ..write('eventTime: $eventTime, ')
+          ..write('eventTimePrecision: $eventTimePrecision, ')
+          ..write('eventTimePending: $eventTimePending, ')
+          ..write('dueTime: $dueTime, ')
+          ..write('dueTimePrecision: $dueTimePrecision, ')
+          ..write('dueTimePending: $dueTimePending, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();

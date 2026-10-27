@@ -1,3 +1,4 @@
+import 'card_time.dart';
 import 'day_key.dart';
 
 /// 卡片状态：未完成或已完成。在回收站里由 [TaskCard.deletedAt] 表示。
@@ -23,6 +24,8 @@ class TaskCard {
     required this.deletedAt,
     required this.createdAt,
     required this.updatedAt,
+    this.eventTime,
+    this.dueTime,
   });
 
   static const defaultColorArgb = 0xFFFFF0B8;
@@ -56,6 +59,12 @@ class TaskCard {
   final DateTime? deletedAt;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  /// 活动时间：事情发生的时间。只是显示出来，不影响顺延。
+  final CardTime? eventTime;
+
+  /// 截止时间：最晚什么时候要做完。只是显示出来，不影响顺延。
+  final CardTime? dueTime;
 }
 
 /// 卡片现在在哪里：给点击历史记录跳转用。
