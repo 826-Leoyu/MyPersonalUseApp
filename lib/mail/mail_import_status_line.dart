@@ -154,7 +154,7 @@ class _MailImportStatusLineState extends ConsumerState<MailImportStatusLine> {
           '新导出文件，请检查 Power Automate 流程',
     PossiblyMissedMails() => '⚠ 可能漏掉了一些邮件，请让设置者手动补读',
     AnalysisPaused() => '⏸ 今天的新邮件较多，已暂停自动分析',
-    ClaudeNotInstalled() => '⚠ 没有找到 Claude Code，请先安装',
+    ClaudeNotInstalled() => '⚠ 找不到 Claude Code，请让设置者检查',
     ClaudeNotLoggedIn() => '⚠ Claude 未登录，请打开 Claude Code 登录',
     ClaudeQuotaExhausted() => '⏳ Claude 额度已用完，稍后自动重试',
     AnalysisFailures(:final count) => '⚠ $count 封邮件分析失败',

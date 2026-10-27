@@ -226,7 +226,7 @@ void main() {
     });
 
     for (final (type, text) in [
-      (AnalysisFailureType.notInstalled, '⚠ 没有找到 Claude Code，请先安装'),
+      (AnalysisFailureType.notInstalled, '⚠ 找不到 Claude Code，请让设置者检查'),
       (AnalysisFailureType.notLoggedIn, '⚠ Claude 未登录，请打开 Claude Code 登录'),
     ]) {
       windowsTest('${type.name}：不自动重试，提示她处理，处理好以后点 [重试]', (tester) async {
