@@ -62,21 +62,30 @@ class _FilteredTileState extends ConsumerState<_FilteredTile> {
       );
       return;
     }
-    await _run((service) => service.markUseful(widget.entry.mailId));
+    await _run(
+      (service) => service.markUseful(widget.entry.mailId),
+      failure: '重新分析失败，请重试',
+    );
   }
 
-  Future<void> _restore() =>
-      _run((service) => service.restoreItem(widget.entry.id));
+  Future<void> _restore() => _run(
+    (service) => service.restoreItem(widget.entry.id),
+    failure: '恢复失败，请重试',
+  );
 
-  /// 执行 [action]；失败时提示，这一条还在列表里。
-  Future<void> _run(Future<void> Function(MailService service) action) async {
+  /// 执行 [action]；失败时提示 [failure]（状态不对时提示原因），这一条还在
+  /// 列表里。
+  Future<void> _run(
+    Future<void> Function(MailService service) action, {
+    required String failure,
+  }) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
     setState(() => _busy = true);
     try {
       await action(await ref.read(mailServiceProvider.future));
     } on PlannerException catch (e) {
       messenger?.showSnackBar(
-        SnackBar(content: Text(e is InvalidState ? e.message : '操作失败，请重试')),
+        SnackBar(content: Text(e is InvalidState ? e.message : failure)),
       );
     } finally {
       if (mounted) setState(() => _busy = false);

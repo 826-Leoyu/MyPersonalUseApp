@@ -265,6 +265,27 @@ void main() {
       expect(await filtered(), isEmpty);
     });
 
+    test('这封邮件正在分析时点 [这封有用]，结果也按有用处理', () async {
+      h.analyzer.fails('Broken', AnalysisFailureType.invalidOutput);
+      await importAndAnalyze([mail('Broken')]);
+      await h.mail.analyzePending();
+      await h.mail.analyzePending();
+      final id = await filteredMailId('Broken');
+      h.analyzer
+        ..returns('Broken', informational)
+        ..hold('Broken');
+      final retry = h.mail.retryAnalysis();
+      await pumpEventQueue();
+
+      final useful = h.mail.markUseful(id);
+      await pumpEventQueue();
+      h.analyzer.release('Broken');
+      await Future.wait([retry, useful]);
+
+      expect(await candidateTitles(), ['Broken']);
+      expect(await filtered(), isEmpty);
+    });
+
     test('不计入每天自动分析的上限', () async {
       const limit = MailService.dailyAutoAnalysisLimit;
       List<Map<String, Object?>> many(int count, String prefix) => [

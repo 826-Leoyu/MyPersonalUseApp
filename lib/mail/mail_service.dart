@@ -1111,8 +1111,15 @@ class MailService {
     ]);
     // 分析期间这封邮件已经不是待分析了：不重复生成事项。
     if (updated == 0) return;
+    // 分析期间可能点了 [这封有用]：看数据库里现在的。
+    final markedUseful =
+        await (_db.selectOnly(_db.mails)
+              ..addColumns([_db.mails.markedUseful])
+              ..where(_db.mails.id.equals(mail.id)))
+            .map((row) => row.read(_db.mails.markedUseful)!)
+            .getSingle();
     final List<AnalyzedItem> analyzed;
-    if (mail.markedUseful) {
+    if (markedUseful) {
       analyzed = result.items.isNotEmpty ? result.items : [_subjectItem(mail)];
     } else if (result.category.producesCandidates) {
       analyzed = result.items;
@@ -1253,15 +1260,12 @@ class MailService {
     final entries = [
       for (final mail in filteredMails) _filteredMail(mail),
       for (final row in ignored)
-        FilteredEntry(
+        _filteredEntry(
+          row.readTable(mails),
           kind: FilteredKind.ignoredItem,
           id: row.readTable(items).id,
           title: row.readTable(items).title,
-          mailId: row.readTable(mails).id,
-          sender: _preview(row.readTable(mails)).displaySender,
-          receivedAt: _fromMillis(row.readTable(mails).receivedAt),
           reason: '你忽略了这个事项',
-          bodyCleared: row.readTable(mails).bodyClearedAt != null,
         ),
     ];
     entries.sort((a, b) {
@@ -1289,17 +1293,32 @@ class MailService {
       ),
       _ => (FilteredKind.informational, mail.categoryReason ?? ''),
     };
-    return FilteredEntry(
+    return _filteredEntry(
+      mail,
       kind: kind,
       id: mail.id,
       title: _preview(mail).displaySubject,
-      mailId: mail.id,
-      sender: _preview(mail).displaySender,
-      receivedAt: _fromMillis(mail.receivedAt),
       reason: reason,
-      bodyCleared: mail.bodyClearedAt != null,
     );
   }
+
+  /// 来自邮件 [mail] 的一条：发件人、日期和正文是否已清除取自这封邮件。
+  FilteredEntry _filteredEntry(
+    MailRow mail, {
+    required FilteredKind kind,
+    required String id,
+    required String title,
+    required String reason,
+  }) => FilteredEntry(
+    kind: kind,
+    id: id,
+    title: title,
+    mailId: mail.id,
+    sender: _preview(mail).displaySender,
+    receivedAt: _fromMillis(mail.receivedAt),
+    reason: reason,
+    bodyCleared: mail.bodyClearedAt != null,
+  );
 
   /// 排序用的时间：截止时间，没有时用活动时间；只有日期时取那天 0 点。
   static DateTime? _sortTime(MailItemRow item) {
@@ -1346,30 +1365,19 @@ class MailService {
   /// [忽略]：事项从栏里消失。事项已经不是候选时抛出 [InvalidState]。
   Future<void> ignoreItem(String itemId) => _write(() async {
     await _requireCandidate(itemId);
-    await (_db.update(_db.mailItems)..where((i) => i.id.equals(itemId))).write(
-      MailItemsCompanion(
-        status: const Value(MailItemStatus.ignored),
-        updatedAt: Value(_nowMillis),
-      ),
-    );
+    await _setItemStatus(itemId, MailItemStatus.ignored);
   });
 
   /// [恢复]：被忽略的事项回到栏里。事项不是被忽略的时抛出 [InvalidState]。
   Future<void> restoreItem(String itemId) => _write(() async {
-    final item = await (_db.select(
-      _db.mailItems,
-    )..where((i) => i.id.equals(itemId))).getSingleOrNull();
-    if (item == null) throw NotFound('找不到事项 $itemId');
-    if (item.status != MailItemStatus.ignored) {
-      throw const InvalidState('这个事项没有被忽略');
-    }
-    await (_db.update(_db.mailItems)..where((i) => i.id.equals(itemId))).write(
-      MailItemsCompanion(
-        status: const Value(MailItemStatus.candidate),
-        updatedAt: Value(_nowMillis),
-      ),
-    );
+    await _requireItem(itemId, MailItemStatus.ignored, '这个事项没有被忽略');
+    await _setItemStatus(itemId, MailItemStatus.candidate);
   });
+
+  Future<void> _setItemStatus(String itemId, MailItemStatus status) =>
+      (_db.update(_db.mailItems)..where((i) => i.id.equals(itemId))).write(
+        MailItemsCompanion(status: Value(status), updatedAt: Value(_nowMillis)),
+      );
 
   /// 事项现在的状态；没有这个事项时为 null。
   Future<MailItemStatus?> itemStatus(String itemId) => _read(() async {
@@ -1399,14 +1407,21 @@ class MailService {
     return item?.mailId;
   });
 
-  Future<MailItemRow> _requireCandidate(String itemId) async {
+  Future<MailItemRow> _requireCandidate(String itemId) =>
+      _requireItem(itemId, MailItemStatus.candidate, '这个事项已经处理过了');
+
+  /// 状态是 [status] 的事项 [itemId]。没有这个事项时抛出 [NotFound]，状态
+  /// 不对时抛出 [InvalidState]，提示 [wrongStatus]。
+  Future<MailItemRow> _requireItem(
+    String itemId,
+    MailItemStatus status,
+    String wrongStatus,
+  ) async {
     final item = await (_db.select(
       _db.mailItems,
     )..where((i) => i.id.equals(itemId))).getSingleOrNull();
     if (item == null) throw NotFound('找不到事项 $itemId');
-    if (item.status != MailItemStatus.candidate) {
-      throw const InvalidState('这个事项已经处理过了');
-    }
+    if (item.status != status) throw InvalidState(wrongStatus);
     return item;
   }
 
