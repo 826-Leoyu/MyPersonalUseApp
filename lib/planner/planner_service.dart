@@ -49,10 +49,7 @@ class PlannerService {
     required String title,
     int? colorArgb,
   }) async {
-    final cleanTitle = _validTitle(title);
-    if (dayKey < _today) {
-      throw const InvalidState('过去的日期不能新建卡片');
-    }
+    final cleanTitle = _validNewCard(dayKey, title);
     return _write(
       () => _insertCard(
         dayKey,
@@ -75,11 +72,8 @@ class PlannerService {
     String? note,
     CardTimes times = (event: null, due: null),
   }) async {
-    final cleanTitle = _validTitle(title);
+    final cleanTitle = _validNewCard(dayKey, title);
     _validNote(note);
-    if (dayKey < _today) {
-      throw const InvalidState('过去的日期不能新建卡片');
-    }
     return _insertCard(
       dayKey,
       x: x,
@@ -88,6 +82,15 @@ class PlannerService {
       note: note,
       times: times,
     );
+  }
+
+  /// 新建卡片的检查：标题合法、不是过去的日期。返回去掉首尾空白的标题。
+  String _validNewCard(DayKey dayKey, String title) {
+    final cleanTitle = _validTitle(title);
+    if (dayKey < _today) {
+      throw const InvalidState('过去的日期不能新建卡片');
+    }
+    return cleanTitle;
   }
 
   Future<TaskCard> _insertCard(

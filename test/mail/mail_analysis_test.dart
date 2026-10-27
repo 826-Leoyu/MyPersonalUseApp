@@ -41,15 +41,19 @@ void main() {
 
   /// 导入这些邮件，并等自动分析结束。
   Future<void> importAndAnalyze(List<Map<String, Object?>> mails) async {
-    await h.importJson('mail-${h.analyzer.requests.length}.json', fakeEnvelope(mails));
+    await h.importJson(
+      'mail-${h.analyzer.requests.length}.json',
+      fakeEnvelope(mails),
+    );
     await h.mail.analyzePending();
   }
 
   Future<List<MailItemCandidate>> candidates() =>
       h.mail.watchCandidates().first;
 
-  Future<List<String>> candidateTitles() async =>
-      [for (final c in await candidates()) c.title];
+  Future<List<String>> candidateTitles() async => [
+    for (final c in await candidates()) c.title,
+  ];
 
   group('自动分析（M-13）', () {
     test('新入库的邮件被自动分析，收件时间新的在前', () async {
@@ -71,7 +75,10 @@ void main() {
 
     test('重复导入同一封邮件不会再分析一次', () async {
       await importAndAnalyze([mail('A')]);
-      await h.importJson('mail-again.json', fakeEnvelope([mail('A'), mail('B')]));
+      await h.importJson(
+        'mail-again.json',
+        fakeEnvelope([mail('A'), mail('B')]),
+      );
       await h.mail.analyzePending();
 
       expect(h.analyzer.analyzedSubjects, ['A', 'B']);
@@ -146,7 +153,10 @@ void main() {
   group('请求的内容（M-27）', () {
     test('只有分析需要的内容，没有收件人、邮件头和附件', () async {
       await importAndAnalyze([
-        mail('A', body: '<p>Form: <a href="https://example.com/f">here</a></p>'),
+        mail(
+          'A',
+          body: '<p>Form: <a href="https://example.com/f">here</a></p>',
+        ),
       ]);
 
       final request = h.analyzer.requests.single;
@@ -230,7 +240,10 @@ void main() {
       h.analyzer
         ..returns('None', actionRequired([]))
         ..returns('One', actionRequired([fakeItem('Item 1')]))
-        ..returns('Two', actionRequired([fakeItem('Item 2a'), fakeItem('Item 2b')]));
+        ..returns(
+          'Two',
+          actionRequired([fakeItem('Item 2a'), fakeItem('Item 2b')]),
+        );
 
       await importAndAnalyze([mail('None'), mail('One'), mail('Two')]);
 
@@ -305,7 +318,10 @@ void main() {
 
       final titles = await candidateTitles();
       expect(titles.take(2), ['Due sooner', 'Due later']);
-      expect(titles.sublist(2, 4), unorderedEquals(['No time', 'Pending time']));
+      expect(
+        titles.sublist(2, 4),
+        unorderedEquals(['No time', 'Pending time']),
+      );
       expect(titles.skip(4), ['Talk sooner', 'Talk later']);
     });
 
@@ -321,6 +337,65 @@ void main() {
       expect(candidate.receivedAt, DateTime.utc(2026, 10, 19, 14, 30));
     });
 
+    test('点开时用的详情：摘要、要做的事、地点和引用的链接', () async {
+      h.analyzer.returns(
+        'Assignment 3',
+        actionRequired([
+          fakeItem(
+            'Submit',
+            summary: 'Upload the PDF report.',
+            actions: ['Write the report', 'Upload the PDF'],
+            location: 'Room 101',
+            linkRefs: [2, 1],
+          ),
+        ]),
+      );
+
+      await importAndAnalyze([
+        mail(
+          'Assignment 3',
+          body:
+              '<p>Upload <a href="https://example.com/a">here</a>, '
+              'rubric <a href="https://example.com/b">here</a>.</p>',
+        ),
+      ]);
+
+      final candidate = (await candidates()).single;
+      expect(candidate.summary, 'Upload the PDF report.');
+      expect(candidate.actions, ['Write the report', 'Upload the PDF']);
+      expect(candidate.location, 'Room 101');
+      expect(candidate.links, [
+        'https://example.com/b',
+        'https://example.com/a',
+      ]);
+    });
+
+    test('邮件有附件或图片时，事项带"附件或图片未分析"的提示', () async {
+      h.analyzer
+        ..returns('With file', actionRequired([fakeItem('A')]))
+        ..returns('With image', actionRequired([fakeItem('B')]))
+        ..returns('Plain', actionRequired([fakeItem('C')]));
+
+      await importAndAnalyze([
+        fakeMessage(
+          internetMessageId: '<file@example.com>',
+          subject: 'With file',
+          hasAttachments: true,
+        ),
+        fakeMessage(
+          internetMessageId: '<image@example.com>',
+          subject: 'With image',
+          body: '<p>Poster</p><img src="cid:poster@01DC">',
+        ),
+        mail('Plain'),
+      ]);
+
+      final flags = {
+        for (final c in await candidates()) c.title: c.hasUnanalyzedAttachments,
+      };
+      expect(flags, {'A': true, 'B': true, 'C': false});
+    });
+
     test('重新打开数据库后候选事项还在', () async {
       h.analyzer.returns('A', actionRequired([fakeItem('Do A')]));
       await importAndAnalyze([mail('A')]);
@@ -333,10 +408,7 @@ void main() {
 
   group('加入（M-16、M-17）', () {
     Future<MailItemCandidate> oneCandidate(AnalyzedItem item) async {
-      h.analyzer.returns(
-        'Assignment 3',
-        actionRequired([item]),
-      );
+      h.analyzer.returns('Assignment 3', actionRequired([item]));
       await importAndAnalyze([
         mail(
           'Assignment 3',
@@ -399,10 +471,7 @@ void main() {
 
       expect(await candidates(), isEmpty);
       expect(await h.mail.watchMailCardIds().first, {card.id});
-      expect(
-        await h.mail.sourceMailOfCard(card.id),
-        candidate.mailId,
-      );
+      expect(await h.mail.sourceMailOfCard(card.id), candidate.mailId);
     });
 
     test('没有备注内容时卡片没有备注', () async {

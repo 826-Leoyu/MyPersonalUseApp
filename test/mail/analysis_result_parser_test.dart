@@ -98,6 +98,20 @@ void main() {
     );
   });
 
+  test('仅供参考和低价值的邮件不看事项，事项写错了也不算输出格式不对', () {
+    for (final category in ['informational', 'lowValue']) {
+      final result = parseAnalysisResult(
+        output(
+          category: category,
+          items: [item(title: '')],
+        ),
+        request(),
+      );
+
+      expect(result.items, isEmpty, reason: category);
+    }
+  });
+
   test('只有日期的时间不编出时刻', () {
     final result = parseAnalysisResult(
       output(

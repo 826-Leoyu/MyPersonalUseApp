@@ -13,16 +13,20 @@ import 'mail_analyzer.dart';
 AnalysisResult parseAnalysisResult(Object? json, AnalysisRequest request) {
   final root = _object(json, '顶层');
   final relatedIds = {for (final item in request.relatedItems) item.id};
+  final category = _enum(MailCategory.values, root['category'], 'category');
+  final items = _list(root['items'], 'items');
   return AnalysisResult(
-    category: _enum(MailCategory.values, root['category'], 'category'),
+    category: category,
     reason: _string(root['reason'], 'reason'),
+    // 另外两类的事项被忽略，写错了也不影响（spec 0002"分析请求和结果"）。
     items: [
-      for (final (i, item) in _list(root['items'], 'items').indexed)
-        _item(
-          _object(item, 'items[$i]'),
-          relatedIds: relatedIds,
-          linkCount: request.links.length,
-        ),
+      if (category.producesCandidates)
+        for (final (i, item) in items.indexed)
+          _item(
+            _object(item, 'items[$i]'),
+            relatedIds: relatedIds,
+            linkCount: request.links.length,
+          ),
     ],
   );
 }
@@ -104,7 +108,9 @@ CardTime? _time(Map<String, Object?> json, String field) {
   }
 }
 
-final _withOffset = RegExp(r'T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$');
+final _withOffset = RegExp(
+  r'T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$',
+);
 
 Map<String, Object?> _object(Object? value, String field) => switch (value) {
   final Map<String, Object?> map => map,

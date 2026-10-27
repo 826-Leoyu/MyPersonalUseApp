@@ -6,14 +6,13 @@ import 'analysis_result_parser.dart';
 import 'mail_analyzer.dart';
 
 /// 启动一个进程。测试里换成按脚本返回结果的假进程。
-typedef ProcessStarter =
-    Future<Process> Function(
-      String executable,
-      List<String> arguments, {
-      required String workingDirectory,
-      required Map<String, String> environment,
-      required bool runInShell,
-    });
+typedef ProcessStarter = Future<Process> Function(
+  String executable,
+  List<String> arguments, {
+  required String workingDirectory,
+  required Map<String, String> environment,
+  required bool runInShell,
+});
 
 Future<Process> _startProcess(
   String executable,
@@ -30,26 +29,45 @@ Future<Process> _startProcess(
   runInShell: runInShell,
 );
 
+/// 结束一个进程和它启动的所有子进程。
+typedef ProcessTreeKiller = Future<void> Function(Process process);
+
+/// Windows 上用 `taskkill /T` 结束整个进程树：npm 版经过 `cmd.exe` 启动，
+/// 只结束 `cmd.exe` 的话 claude 还会在后台跑。
+Future<void> _killProcessTree(Process process) async {
+  if (Platform.isWindows) {
+    try {
+      await Process.run('taskkill', ['/PID', '${process.pid}', '/T', '/F']);
+    } on ProcessException {
+      // 没有 taskkill 时退回到只结束这一个进程。
+    }
+  }
+  process.kill(ProcessSignal.sigkill);
+}
+
 /// 用本机已登录的官方 Claude Code 命令行分析邮件（spec 0002"ClaudeCodeAnalyzer
 /// 的安全要求"）。参数和失败提示的依据见 docs/research/claude-code-noninteractive.md。
 ///
 /// - 禁用全部工具，只留下按 schema 输出用的内部工具；
 /// - 每次在新建的空临时目录里运行，用完删除；
 /// - 邮件内容只通过标准输入传入，不放进命令行参数，也不写文件；
-/// - 超时后结束进程，按临时错误处理。
+/// - 超时后结束整个进程树，按临时错误处理。
 class ClaudeCodeAnalyzer implements MailAnalyzer {
   ClaudeCodeAnalyzer({
     ProcessStarter? startProcess,
     Map<String, String>? environment,
     String? Function(Map<String, String> environment)? findExecutable,
+    ProcessTreeKiller? killProcessTree,
     this.timeout = const Duration(seconds: 120),
   }) : _start = startProcess ?? _startProcess,
+       _killTree = killProcessTree ?? _killProcessTree,
        _environment = environment ?? Platform.environment,
        _find =
            findExecutable ??
            ((env) => findClaudeExecutable(env, windows: Platform.isWindows));
 
   final ProcessStarter _start;
+  final ProcessTreeKiller _killTree;
   final Map<String, String> _environment;
   final String? Function(Map<String, String>) _find;
   final Duration timeout;
@@ -120,7 +138,7 @@ class ClaudeCodeAnalyzer implements MailAnalyzer {
     try {
       exitCode = await process.exitCode.timeout(timeout);
     } on TimeoutException {
-      process.kill(ProcessSignal.sigkill);
+      await _killTree(process);
       unawaited(stdout.then((_) {}, onError: (_) {}));
       unawaited(stderr.then((_) {}, onError: (_) {}));
       throw const AnalysisFailed(AnalysisFailureType.temporary, '超时');
@@ -143,16 +161,10 @@ class ClaudeCodeAnalyzer implements MailAnalyzer {
       );
     }
     if (decoded is! Map<String, Object?>) {
-      throw const AnalysisFailed(
-        AnalysisFailureType.invalidOutput,
-        '输出不是对象',
-      );
+      throw const AnalysisFailed(AnalysisFailureType.invalidOutput, '输出不是对象');
     }
     if (decoded['is_error'] == true || output.exitCode != 0) {
-      throw AnalysisFailed(
-        _classifyError(decoded),
-        '退出码 ${output.exitCode}',
-      );
+      throw AnalysisFailed(_classifyError(decoded), '退出码 ${output.exitCode}');
     }
     if (!decoded.containsKey('structured_output')) {
       throw const AnalysisFailed(

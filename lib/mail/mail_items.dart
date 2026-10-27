@@ -6,6 +6,9 @@ class MailItemCandidate {
     required this.id,
     required this.title,
     required this.summary,
+    required this.actions,
+    required this.location,
+    required this.links,
     required this.eventTime,
     required this.dueTime,
     required this.optional,
@@ -19,13 +22,21 @@ class MailItemCandidate {
   final String id;
   final String title;
   final String? summary;
+
+  /// 要做的事，可以为空列表。
+  final List<String> actions;
+  final String? location;
+
+  /// 事项引用的链接，按引用的顺序。
+  final List<String> links;
+
   final CardTime? eventTime;
   final CardTime? dueTime;
 
   /// 可选活动，栏里带"可选"标签。
   final bool optional;
 
-  /// 邮件有附件或图片没有分析。
+  /// 邮件有附件或图片，没有分析，栏里提示"附件或图片未分析"。
   final bool hasUnanalyzedAttachments;
 
   /// 来源邮件。

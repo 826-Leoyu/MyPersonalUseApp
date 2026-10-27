@@ -295,4 +295,41 @@ void main() {
     expect(find.text('查看来源邮件'), findsNothing);
     await harness.dispose(tester);
   });
+
+  windowsTest('点开事项看到摘要、要做的事、地点和链接，可以打开原邮件', (tester) async {
+    harness.analyzer.returns(
+      'Report due',
+      actionRequired([
+        fakeItem(
+          '交周报',
+          summary: '每周五交',
+          actions: ['写周报'],
+          location: 'Room 101',
+        ),
+      ]),
+    );
+    await harness.seedMail(tester, [mail('Report due')]);
+    await harness.launch(tester);
+    expect(find.text('每周五交'), findsNothing);
+
+    await tapAndSettle(tester, find.text('交周报'));
+
+    expect(find.text('每周五交'), findsOneWidget);
+    expect(find.text('- 写周报'), findsOneWidget);
+    expect(find.text('地点：Room 101'), findsOneWidget);
+    await tapAndSettle(tester, find.text('查看原邮件'));
+    expect(find.byType(MailDetailPage), findsOneWidget);
+    await harness.dispose(tester);
+  });
+
+  windowsTest('邮件有附件时，事项上提示"附件或图片未分析"', (tester) async {
+    harness.analyzer.returns('Report due', actionRequired([fakeItem('交周报')]));
+    await harness.seedMail(tester, [
+      {...mail('Report due'), 'hasAttachments': true},
+    ]);
+    await harness.launch(tester);
+
+    expect(find.text('附件或图片未分析'), findsOneWidget);
+    await harness.dispose(tester);
+  });
 }

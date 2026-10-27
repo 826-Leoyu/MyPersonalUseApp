@@ -7,6 +7,7 @@ import '../board/read_failure_view.dart';
 import '../formatting/date_format.dart';
 import '../planner/day_key.dart';
 import '../planner/planner_exceptions.dart';
+import 'mail_detail_page.dart';
 import 'mail_items.dart';
 import 'mail_service.dart';
 
@@ -96,7 +97,8 @@ class MailItemsPanel extends ConsumerWidget {
 }
 
 /// 一条候选事项：标题、"可选"标签、时间、来自哪封邮件，下面是"改日期"、
-/// [忽略] 和 [加入]。
+/// [忽略] 和 [加入]。点它展开详情：摘要、要做的事、地点、链接和
+/// [查看原邮件]。
 class _CandidateTile extends ConsumerStatefulWidget {
   const _CandidateTile({
     super.key,
@@ -117,6 +119,9 @@ class _CandidateTileState extends ConsumerState<_CandidateTile> {
 
   /// 正在加入或忽略，按钮先不响应，避免点两次。
   bool _busy = false;
+
+  /// 展开着详情没有。
+  bool _expanded = false;
 
   DayKey get _targetDay {
     final today = ref.read(todayProvider);
@@ -185,60 +190,93 @@ class _CandidateTileState extends ConsumerState<_CandidateTile> {
     final today = ref.watch(todayProvider);
     final day = _targetDay;
     final id = item.id;
+    final details = [
+      ?item.summary,
+      for (final action in item.actions) '- $action',
+      if (item.location case final location?) '地点：$location',
+      ...item.links,
+    ];
     return Card(
       margin: const EdgeInsets.only(bottom: PlannerTheme.space2),
-      child: Padding(
-        padding: const EdgeInsetsDirectional.fromSTEB(
-          PlannerTheme.space3,
-          PlannerTheme.space3,
-          PlannerTheme.space2,
-          PlannerTheme.space1,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(child: Text(item.title, style: textTheme.titleSmall)),
-                if (item.optional) ...[
-                  const SizedBox(width: PlannerTheme.space2),
-                  const _OptionalTag(),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => setState(() => _expanded = !_expanded),
+        child: Padding(
+          padding: const EdgeInsetsDirectional.fromSTEB(
+            PlannerTheme.space3,
+            PlannerTheme.space3,
+            PlannerTheme.space2,
+            PlannerTheme.space1,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(item.title, style: textTheme.titleSmall),
+                  ),
+                  if (item.optional) ...[
+                    const SizedBox(width: PlannerTheme.space2),
+                    const _OptionalTag(),
+                  ],
                 ],
-              ],
-            ),
-            if (timeLine != null) Text(timeLine, style: textTheme.bodySmall),
-            Text(
-              '来自 ${item.sender}《${item.mailSubject}》',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: textTheme.bodySmall?.copyWith(color: mutedColor),
-            ),
-            Row(
-              children: [
-                Tooltip(
-                  message: '改日期',
-                  child: TextButton.icon(
-                    key: MailItemsPanel.dateButtonKey(id),
-                    onPressed: _busy ? null : _pickDay,
-                    icon: const Icon(Icons.event, size: 18),
-                    label: Text(day == today ? '今天' : formatShortDate(day)),
+              ),
+              if (timeLine != null) Text(timeLine, style: textTheme.bodySmall),
+              Text(
+                '来自 ${item.sender}《${item.mailSubject}》',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: textTheme.bodySmall?.copyWith(color: mutedColor),
+              ),
+              if (item.hasUnanalyzedAttachments)
+                Text(
+                  '附件或图片未分析',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.error,
                   ),
                 ),
-                const Spacer(),
-                TextButton(
-                  key: MailItemsPanel.ignoreButtonKey(id),
-                  onPressed: _busy ? null : _ignore,
-                  child: const Text('忽略'),
-                ),
-                FilledButton.tonal(
-                  key: MailItemsPanel.acceptButtonKey(id),
-                  onPressed: _busy ? null : _accept,
-                  child: const Text('加入'),
+              if (_expanded) ...[
+                const SizedBox(height: PlannerTheme.space2),
+                for (final line in details)
+                  SelectableText(line, style: textTheme.bodyMedium),
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: TextButton.icon(
+                    onPressed: () =>
+                        MailDetailPage.open(Navigator.of(context), item.mailId),
+                    icon: const Icon(Icons.mail_outline, size: 18),
+                    label: const Text('查看原邮件'),
+                  ),
                 ),
               ],
-            ),
-          ],
+              Row(
+                children: [
+                  Tooltip(
+                    message: '改日期',
+                    child: TextButton.icon(
+                      key: MailItemsPanel.dateButtonKey(id),
+                      onPressed: _busy ? null : _pickDay,
+                      icon: const Icon(Icons.event, size: 18),
+                      label: Text(day == today ? '今天' : formatShortDate(day)),
+                    ),
+                  ),
+                  const Spacer(),
+                  TextButton(
+                    key: MailItemsPanel.ignoreButtonKey(id),
+                    onPressed: _busy ? null : _ignore,
+                    child: const Text('忽略'),
+                  ),
+                  FilledButton.tonal(
+                    key: MailItemsPanel.acceptButtonKey(id),
+                    onPressed: _busy ? null : _accept,
+                    child: const Text('加入'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -21,7 +21,8 @@ enum MailCategory {
   lowValue;
 
   /// 这一类的事项会不会进"新邮件事项"栏。
-  bool get producesCandidates => this == actionRequired || this == optionalEvent;
+  bool get producesCandidates =>
+      this == actionRequired || this == optionalEvent;
 }
 
 /// 分析失败的类型，决定之后怎么重试（重试规则在 #86）。

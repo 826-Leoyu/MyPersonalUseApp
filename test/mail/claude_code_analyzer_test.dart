@@ -59,6 +59,8 @@ void main() {
     startProcess: starter.start,
     environment: environment,
     findExecutable: (_) => executable,
+    // 不在测试里真的执行 taskkill。
+    killProcessTree: (process) async => process.kill(),
     timeout: timeout,
   );
 
@@ -336,6 +338,27 @@ void main() {
         isFalse,
       );
     });
+
+    test('超时后结束的是整个进程树：npm 版经过 cmd.exe，claude 是它的子进程', () async {
+      final killed = <Process>[];
+      analyzer = ClaudeCodeAnalyzer(
+        startProcess: starter.start,
+        environment: const {'PATH': r'C:\npm'},
+        findExecutable: (_) => r'C:\npm\claude.cmd',
+        timeout: const Duration(milliseconds: 50),
+        killProcessTree: (process) async {
+          killed.add(process);
+          process.kill();
+        },
+      );
+      starter.hang();
+
+      await expectLater(
+        analyzer.analyze(request),
+        failsWith(AnalysisFailureType.temporary),
+      );
+      expect(killed, [starter.calls.single.process]);
+    });
   });
 
   group('找到 claude', () {
@@ -355,10 +378,7 @@ void main() {
     });
 
     test('Windows 上再在 PATH 里找 claude.exe，最后找 claude.cmd', () {
-      final env = {
-        'USERPROFILE': r'C:\Users\her',
-        'Path': r'C:\npm;C:\tools',
-      };
+      final env = {'USERPROFILE': r'C:\Users\her', 'Path': r'C:\npm;C:\tools'};
 
       expect(
         findClaudeExecutable(
@@ -452,17 +472,16 @@ class FakeProcessStarter {
   }) async {
     if (_failToStart) throw ProcessException(executable, arguments);
     final process = _scripts.removeAt(0)();
-    final promptPath =
-        arguments[arguments.indexOf('--system-prompt-file') + 1];
+    final promptPath = arguments[arguments.indexOf('--system-prompt-file') + 1];
     calls.add(
       StartedCall(
         executable: executable,
         arguments: arguments,
         workingDirectory: workingDirectory,
         environment: environment,
-        workingDirectoryWasEmpty: Directory(
-          workingDirectory,
-        ).listSync().isEmpty,
+        workingDirectoryWasEmpty: Directory(workingDirectory)
+            .listSync()
+            .isEmpty,
         promptFilePath: promptPath,
         promptFileContent: File(promptPath).readAsStringSync(),
         process: process,

@@ -273,9 +273,7 @@ class MailService {
       _analyzeAgain = true;
       return running;
     }
-    return _analysisRun = _analyzeAll().whenComplete(
-      () => _analysisRun = null,
-    );
+    return _analysisRun = _analyzeAll().whenComplete(() => _analysisRun = null);
   }
 
   Future<void> _analyzeAll() async {
@@ -333,9 +331,7 @@ class MailService {
         AnalysisFailureType.temporary => true,
       };
     } on Exception {
-      await _write(
-        () => _saveFailure(mail.id, AnalysisFailureType.temporary),
-      );
+      await _write(() => _saveFailure(mail.id, AnalysisFailureType.temporary));
       return true;
     }
     await _write(() => _saveAnalysis(mail, result));
@@ -510,10 +506,17 @@ class MailService {
             id: item.id,
             title: item.title,
             summary: item.summary,
+            actions: _itemActions(item),
+            location: item.location,
+            links: _itemLinks(item, _decodeLinks(mail.links)),
             eventTime: _itemEventTime(item),
             dueTime: _itemDueTime(item),
             optional: item.optional,
-            hasUnanalyzedAttachments: item.hasUnanalyzedAttachments,
+            // 邮件有附件或图片时一律提示，不只看分析结果。
+            hasUnanalyzedAttachments:
+                item.hasUnanalyzedAttachments ||
+                mail.hasAttachments ||
+                mail.hasInlineImages,
             mailId: mail.id,
             mailSubject: _preview(mail).displaySubject,
             sender: _preview(mail).displaySender,
@@ -555,9 +558,7 @@ class MailService {
       note: _cardNote(item, _decodeLinks(mail.links)),
       times: (event: _itemEventTime(item), due: _itemDueTime(item)),
     );
-    await (_db.update(
-      _db.mailItems,
-    )..where((i) => i.id.equals(itemId))).write(
+    await (_db.update(_db.mailItems)..where((i) => i.id.equals(itemId))).write(
       MailItemsCompanion(
         status: const Value(MailItemStatus.accepted),
         cardId: Value(card.id),
@@ -570,9 +571,7 @@ class MailService {
   /// [忽略]：事项从栏里消失。事项已经不是候选时抛出 [InvalidState]。
   Future<void> ignoreItem(String itemId) => _write(() async {
     await _requireCandidate(itemId);
-    await (_db.update(
-      _db.mailItems,
-    )..where((i) => i.id.equals(itemId))).write(
+    await (_db.update(_db.mailItems)..where((i) => i.id.equals(itemId))).write(
       MailItemsCompanion(
         status: const Value(MailItemStatus.ignored),
         updatedAt: Value(_nowMillis),
@@ -621,25 +620,32 @@ class MailService {
 
   /// 卡片的备注：依次是摘要、要做的事、地点、第一个链接；都没有时为 null。
   static String? _cardNote(MailItemRow item, List<String> links) {
-    final actions = switch (item.actions) {
-      final json? => (jsonDecode(json) as List<Object?>).cast<String>(),
-      null => const <String>[],
-    };
+    final lines = [
+      ?item.summary,
+      for (final action in _itemActions(item)) '- $action',
+      if (item.location case final location?) '地点：$location',
+      ?_itemLinks(item, links).firstOrNull,
+    ];
+    if (lines.isEmpty) return null;
+    return _truncate(lines.join('\n'), PlannerService.maxNoteLength);
+  }
+
+  /// 事项要做的事。
+  static List<String> _itemActions(MailItemRow item) => switch (item.actions) {
+    final json? => (jsonDecode(json) as List<Object?>).cast<String>(),
+    null => const [],
+  };
+
+  /// 事项引用的链接，按引用的顺序；[links] 是邮件的链接列表。
+  static List<String> _itemLinks(MailItemRow item, List<String> links) {
     final refs = switch (item.linkRefs) {
       final json? => (jsonDecode(json) as List<Object?>).cast<int>(),
       null => const <int>[],
     };
-    final firstLink = refs.isEmpty || refs.first > links.length
-        ? null
-        : links[refs.first - 1];
-    final lines = [
-      ?item.summary,
-      for (final action in actions) '- $action',
-      if (item.location case final location?) '地点：$location',
-      ?firstLink,
+    return [
+      for (final ref in refs)
+        if (ref >= 1 && ref <= links.length) links[ref - 1],
     ];
-    if (lines.isEmpty) return null;
-    return _truncate(lines.join('\n'), PlannerService.maxNoteLength);
   }
 
   static String _truncate(String text, int maxCharacters) {
