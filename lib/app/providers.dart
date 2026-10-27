@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../mail/claude_code_analyzer.dart';
 import '../mail/mail_analyzer.dart';
+import '../mail/mail_items.dart';
 import '../mail/mail_preview.dart';
 import '../mail/mail_service.dart';
 import '../planner/day_board.dart';
@@ -130,6 +131,22 @@ final mailServiceProvider = FutureProvider<MailService>((ref) async {
   );
   unawaited(service.analyzePending());
   return service;
+}, retry: (_, _) => null);
+
+/// "新邮件事项"栏里的候选事项，排好序。读取失败时是错误状态。
+final mailCandidatesProvider = StreamProvider<List<MailItemCandidate>>(
+  (ref) async* {
+    final service = await ref.watch(mailServiceProvider.future);
+    yield* service.watchCandidates();
+  },
+  // 不自动重试：读不出来时栏里显示提示，由用户点「重试」。
+  retry: (_, _) => null,
+);
+
+/// 由邮件事项加入的卡片的 id，给卡片上的信封图标用。读不出来时不显示图标。
+final mailCardIdsProvider = StreamProvider<Set<String>>((ref) async* {
+  final service = await ref.watch(mailServiceProvider.future);
+  yield* service.watchMailCardIds();
 }, retry: (_, _) => null);
 
 /// 已导入的邮件，给邮件预览列表用。读取失败时是错误状态。

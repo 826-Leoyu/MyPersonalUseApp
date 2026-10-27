@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:clock/clock.dart';
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
@@ -8,6 +10,7 @@ import 'package:my_personal_use_app/app/planner_app.dart';
 import 'package:my_personal_use_app/app/providers.dart';
 import 'package:my_personal_use_app/board/board_canvas.dart';
 import 'package:my_personal_use_app/board/board_selection.dart';
+import 'package:my_personal_use_app/mail/mail_service.dart';
 import 'package:my_personal_use_app/planner/day_board.dart';
 import 'package:my_personal_use_app/planner/day_key.dart';
 import 'package:my_personal_use_app/planner/planner_service.dart';
@@ -15,6 +18,7 @@ import 'package:my_personal_use_app/storage/planner_database.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import '../mail/fake_analyzer.dart';
+import '../mail/mail_fixtures.dart';
 import '../support/failing_storage.dart';
 
 /// 切入点 2 的测试环境：真实的 [PlannerApp] + 真实的 [PlannerService] +
@@ -88,6 +92,32 @@ class BoardHarness {
       }
     });
     return result as T;
+  }
+
+  /// 在启动 App 之前导入 [messages]（虚构邮件，见 `fakeMessage`），并用
+  /// [analyzer] 分析完。
+  Future<void> seedMail(
+    WidgetTester tester,
+    List<Map<String, Object?>> messages,
+  ) async {
+    await tester.runAsync(() async {
+      final directory = Directory.systemTemp.createTempSync('board_mail_');
+      final database = _newConnection();
+      try {
+        final file = File('${directory.path}${Platform.pathSeparator}mail.json')
+          ..writeAsBytesSync(encode(fakeEnvelope(messages)));
+        final service = MailService(
+          planner: PlannerService(database: database, clock: _clock),
+          analyzer: analyzer,
+          clock: _clock,
+        );
+        await service.importFile(file.path);
+        await service.analyzePending();
+      } finally {
+        await database.close();
+        directory.deleteSync(recursive: true);
+      }
+    });
   }
 
   /// 直接改数据库，把卡片挪到 [dayKey] 那一天。正常操作造不出两端不在同一天的
