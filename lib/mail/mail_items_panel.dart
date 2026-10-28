@@ -7,6 +7,7 @@ import '../board/read_failure_view.dart';
 import '../formatting/date_format.dart';
 import '../planner/day_key.dart';
 import '../planner/planner_exceptions.dart';
+import 'filtered_mails_page.dart';
 import 'mail_detail_page.dart';
 import 'mail_import_status_line.dart';
 import 'mail_items.dart';
@@ -15,7 +16,8 @@ import 'mail_service.dart';
 /// "新邮件事项"栏的宽度（宽屏时在画布右边），连同四周的留白。
 const mailItemsPanelWidth = 336.0;
 
-/// "新邮件事项"栏的内容：标题和候选事项。每条候选可以 [加入]（默认今天，
+/// "新邮件事项"栏的内容：标题、状态行、候选事项，底部是
+/// "已过滤的邮件 (N)"。每条候选可以 [加入]（默认今天，
 /// "改日期"可以选今天或以后）或 [忽略]。宽屏时放在画布右边的面板里，窄屏
 /// 时放在底部面板里，内容一样。
 class MailItemsPanel extends ConsumerWidget {
@@ -97,7 +99,29 @@ class MailItemsPanel extends ConsumerWidget {
             _ => const SizedBox.shrink(),
           },
         ),
+        const _FilteredMailsButton(),
       ],
+    );
+  }
+}
+
+/// 栏底部的"已过滤的邮件 (N)"，打开已过滤的邮件。读不出来时不显示数字。
+class _FilteredMailsButton extends ConsumerWidget {
+  const _FilteredMailsButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final count = ref.watch(mailFilteredProvider).value?.length;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: PlannerTheme.space2),
+      child: Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: TextButton.icon(
+          onPressed: () => FilteredMailsPage.open(Navigator.of(context)),
+          icon: const Icon(Icons.filter_list, size: 18),
+          label: Text(count == null ? '已过滤的邮件' : '已过滤的邮件 ($count)'),
+        ),
+      ),
     );
   }
 }
@@ -223,9 +247,13 @@ class _CandidateTileState extends ConsumerState<_CandidateTile> {
                   Expanded(
                     child: Text(item.title, style: textTheme.titleSmall),
                   ),
+                  if (item.updated) ...[
+                    const SizedBox(width: PlannerTheme.space2),
+                    const _Tag('已更新'),
+                  ],
                   if (item.optional) ...[
                     const SizedBox(width: PlannerTheme.space2),
-                    const _OptionalTag(),
+                    const _Tag('可选'),
                   ],
                 ],
               ),
@@ -236,6 +264,11 @@ class _CandidateTileState extends ConsumerState<_CandidateTile> {
                 overflow: TextOverflow.ellipsis,
                 style: textTheme.bodySmall?.copyWith(color: mutedColor),
               ),
+              if (item.relatedHint case final note?)
+                Text(
+                  note,
+                  style: textTheme.bodySmall?.copyWith(color: mutedColor),
+                ),
               if (item.hasUnanalyzedAttachments)
                 Text(
                   '附件或图片未分析',
@@ -289,9 +322,11 @@ class _CandidateTileState extends ConsumerState<_CandidateTile> {
   }
 }
 
-/// 可选活动上的"可选"标签。
-class _OptionalTag extends StatelessWidget {
-  const _OptionalTag();
+/// 事项标题旁边的小标签：可选活动的"可选"、被后续邮件更新过的"已更新"。
+class _Tag extends StatelessWidget {
+  const _Tag(this.text);
+
+  final String text;
 
   @override
   Widget build(BuildContext context) {
@@ -304,7 +339,7 @@ class _OptionalTag extends StatelessWidget {
       child: Padding(
         padding: PlannerTheme.tagPadding,
         child: Text(
-          '可选',
+          text,
           style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color),
         ),
       ),

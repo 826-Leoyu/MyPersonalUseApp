@@ -141,6 +141,23 @@ class PlannerService {
     required String title,
     required String? note,
     CardTimes? times,
+  }) => _write(
+    () => updateCardContentInTransaction(
+      id,
+      title: title,
+      note: note,
+      times: times,
+    ),
+  );
+
+  /// 和 [updateCardContent] 一样修改卡片，但不开自己的事务：只能在调用方的
+  /// 事务里调用（`MailService` 的 [采用]），调用方的事务失败时修改一起回滚。
+  /// 存储报错原样抛出，交给调用方的事务处理。
+  Future<void> updateCardContentInTransaction(
+    String id, {
+    required String title,
+    required String? note,
+    CardTimes? times,
   }) async {
     final cleanTitle = _validTitle(title);
     _validNote(note);
@@ -160,7 +177,7 @@ class PlannerService {
         dueTimePending: Value(due.pending),
       );
     }
-    await _write(() => _updateCard(id, changes));
+    await _updateCard(id, changes);
   }
 
   /// 把卡片移到新位置，并提到当天所有卡片的最上层。

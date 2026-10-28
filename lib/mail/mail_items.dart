@@ -1,4 +1,5 @@
 import '../planner/card_time.dart';
+import 'item_changes.dart';
 
 /// "新邮件事项"栏里的一条候选事项。
 class MailItemCandidate {
@@ -13,6 +14,8 @@ class MailItemCandidate {
     required this.dueTime,
     required this.optional,
     required this.hasUnanalyzedAttachments,
+    required this.updated,
+    required this.relatedHint,
     required this.mailId,
     required this.mailSubject,
     required this.sender,
@@ -39,7 +42,14 @@ class MailItemCandidate {
   /// 邮件有附件或图片，没有分析，栏里提示"附件或图片未分析"。
   final bool hasUnanalyzedAttachments;
 
-  /// 来源邮件。
+  /// 被后续邮件直接更新过，栏里标"已更新"。
+  final bool updated;
+
+  /// 后续邮件涉及已完成、已删除或已忽略的事项时，注明和哪件事有关，例如
+  /// "可能和已完成的《交作业 3》有关"；没有相关事项时为 null。
+  final String? relatedHint;
+
+  /// 来源邮件；被后续邮件更新过时是最新的那封。
   final String mailId;
 
   /// 来源邮件的主题，没有主题时为"（无主题）"。
@@ -50,4 +60,83 @@ class MailItemCandidate {
 
   /// 来源邮件的收件时间（UTC）。
   final DateTime? receivedAt;
+}
+
+/// "已过滤的邮件"里一条是什么。
+enum FilteredKind {
+  /// 分类为仅供参考的邮件。
+  informational,
+
+  /// 分类为低价值的邮件。
+  lowValue,
+
+  /// 首次设置时较早的邮件，没有自动分析。
+  notAnalyzed,
+
+  /// 分析失败的邮件。
+  analysisFailed,
+
+  /// 被忽略的事项，可以 [恢复]。
+  ignoredItem;
+
+  /// 这一条是一封邮件，可以点 [这封有用]。
+  bool get isMail => this != ignoredItem;
+}
+
+/// "已过滤的邮件"里的一条：一封没有生成候选事项的邮件，或者一个被忽略的
+/// 事项。
+class FilteredEntry {
+  const FilteredEntry({
+    required this.kind,
+    required this.id,
+    required this.title,
+    required this.mailId,
+    required this.sender,
+    required this.receivedAt,
+    required this.reason,
+    required this.bodyCleared,
+  });
+
+  final FilteredKind kind;
+
+  /// 邮件的 id，被忽略的事项时是事项的 id。
+  final String id;
+
+  /// 邮件的主题（没有主题时为"（无主题）"），被忽略的事项时是事项的标题。
+  final String title;
+
+  /// 邮件，或者事项的来源邮件。
+  final String mailId;
+
+  /// 邮件的发件人：名字，没有名字时用地址。
+  final String sender;
+
+  /// 邮件的收件时间（UTC）。
+  final DateTime? receivedAt;
+
+  /// 一句话理由。
+  final String reason;
+
+  /// 邮件的正文已经清除，[这封有用] 不可用。
+  final bool bodyCleared;
+}
+
+/// 已加入的卡片上的一条更新建议：后续邮件提出的改动，她点 [采用] 才写到
+/// 卡片上。
+class CardUpdate {
+  const CardUpdate({
+    required this.id,
+    required this.cardId,
+    required this.changes,
+    required this.cardTimes,
+  });
+
+  final String id;
+  final String cardId;
+
+  /// 建议改动的字段和新值。
+  final ItemChanges changes;
+
+  /// 卡片现在的两个时间，提示里显示"截止 Oct 30 → Nov 2"用。
+  final CardTimes cardTimes;
 }

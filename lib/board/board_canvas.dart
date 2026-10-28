@@ -12,7 +12,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../app/planner_theme.dart';
 import '../app/providers.dart';
 import '../formatting/date_format.dart';
+import '../mail/card_update_bar.dart';
 import '../mail/mail_detail_page.dart';
+import '../mail/mail_items.dart';
+import '../mail/mail_service.dart';
 import '../planner/card_colors.dart';
 import '../planner/card_time.dart';
 import '../planner/carry_over_record.dart';
@@ -73,6 +76,11 @@ class BoardCanvas extends ConsumerStatefulWidget {
 
   /// 来自邮件的卡片右上角信封图标的 key。
   static Key mailIconKey(String cardId) => ValueKey('mail-icon-$cardId');
+
+  /// 卡片下面更新提示条上 [采用] 和 [不用] 的 key。
+  static Key applyUpdateKey(String cardId) => ValueKey('apply-update-$cardId');
+  static Key rejectUpdateKey(String cardId) =>
+      ValueKey('reject-update-$cardId');
 
   /// 选中的卡片右下角调整大小的手柄的 key。
   static Key resizeHandleKey(String cardId) =>
@@ -367,8 +375,8 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
           _finishCard(card, _Finish.complete);
         }
         return;
-      // 第一下点在新卡片上：和双击新卡片一样，什么都不做。
-      case _DownOnDraft():
+      // 第一下点在新卡片或更新提示条上：和双击它们一样，什么都不做。
+      case _DownOnDraft() || _DownOnUpdateBar():
         return;
       // 第一下点在历史记录上：和双击历史记录一样，跳到卡片所在的日期。
       case _DownOnRecord(:final record):
@@ -380,6 +388,27 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     // 过去的日期不能新建卡片。
     if (position == null || !widget.canCreateCards) return;
     _save(() => _selection.newCardAt(_transform.toScene(position)));
+  }
+
+  /// 正在采用或不用的更新建议。
+  final _resolvingUpdates = <String>{};
+
+  /// 卡片下面的 [采用] / [不用]：执行 [action]；失败时提示 [failure]，提示条
+  /// 还在。
+  Future<void> _resolveUpdate(
+    String updateId,
+    Future<void> Function(MailService service) action, {
+    required String failure,
+  }) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    setState(() => _resolvingUpdates.add(updateId));
+    try {
+      await action(await ref.read(mailServiceProvider.future));
+    } on PlannerException {
+      messenger?.showSnackBar(SnackBar(content: Text(failure)));
+    } finally {
+      if (mounted) setState(() => _resolvingUpdates.remove(updateId));
+    }
   }
 
   /// 编辑来自邮件的卡片时点「查看来源邮件」：先保存编辑的内容，再打开那封
@@ -981,6 +1010,10 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
     final mailCardIds = mailAvailable
         ? ref.watch(mailCardIdsProvider).value ?? const <String>{}
         : const <String>{};
+    // 读不出来时不显示更新提示条，画布照常。
+    final cardUpdates = mailAvailable
+        ? ref.watch(mailCardUpdatesProvider).value ?? const {}
+        : const <String, CardUpdate>{};
     ref.listen(boardSelectionProvider, (_, next) {
       if (next is! Editing) _takeKeyboardFocus();
     });
@@ -1138,6 +1171,43 @@ class _BoardCanvasState extends ConsumerState<BoardCanvas>
                   onResizeEnd: () => _onResizeEnd(card),
                   onOpenSourceMail: () => _openSourceMail(card.id),
                 ),
+              for (final card in ordered)
+                if (cardUpdates[card.id] case final update?
+                    when !_leaving.containsKey(card.id))
+                  Positioned(
+                    left: boxes[card.id]!.x,
+                    top: boxes[card.id]!.y + boxes[card.id]!.height + 4,
+                    width: math.max(
+                      boxes[card.id]!.width,
+                      TaskCard.defaultWidth,
+                    ),
+                    // 点在提示条上（包括按钮以外的地方）不算点空白处。
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {},
+                      onDoubleTap: () {},
+                      child: Listener(
+                        onPointerDown: (_) =>
+                            _downOn = const _DownOnUpdateBar(),
+                        child: CardUpdateBar(
+                          update: update,
+                          busy: _resolvingUpdates.contains(update.id),
+                          applyKey: BoardCanvas.applyUpdateKey(card.id),
+                          rejectKey: BoardCanvas.rejectUpdateKey(card.id),
+                          onApply: () => _resolveUpdate(
+                            update.id,
+                            (service) => service.applyUpdate(update.id),
+                            failure: '采用失败，请重试',
+                          ),
+                          onReject: () => _resolveUpdate(
+                            update.id,
+                            (service) => service.rejectUpdate(update.id),
+                            failure: '保存失败，请重试',
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
               if (armed != null) ..._armedPreview(armed, boxes),
               if (selection case final EditingNewCard draft)
                 Positioned(
@@ -1309,6 +1379,11 @@ final class _DownOnCard extends _DownTarget {
 /// 按在还没保存的新卡片上。
 final class _DownOnDraft extends _DownTarget {
   const _DownOnDraft();
+}
+
+/// 按在卡片下面的更新提示条上。
+final class _DownOnUpdateBar extends _DownTarget {
+  const _DownOnUpdateBar();
 }
 
 /// 按在历史记录上。

@@ -127,6 +127,27 @@ class BoardHarness {
     });
   }
 
+  /// 在启动 App 之前用 [MailService] 准备数据，比如加入一个事项。
+  Future<T> seedWithMail<T>(
+    WidgetTester tester,
+    Future<T> Function(MailService service) action,
+  ) async {
+    final result = await tester.runAsync(() async {
+      final database = _newConnection();
+      try {
+        return await action(
+          MailService(
+            planner: PlannerService(database: database, clock: _clock),
+            clock: _clock,
+          ),
+        );
+      } finally {
+        await database.close();
+      }
+    });
+    return result as T;
+  }
+
   /// 在启动 App 之前选好邮件文件夹 [folder]，并按 [scans] 扫描几次（中间
   /// 隔一分钟）。
   Future<void> seedMailFolder(
@@ -149,6 +170,26 @@ class BoardHarness {
           await service.scanFolder();
         }
         await service.waitForAnalysis();
+      } finally {
+        await database.close();
+      }
+    });
+  }
+
+  /// 直接改数据库，清除所有邮件的正文和链接，模拟正文到期后被清除。
+  Future<void> clearMailBodies(WidgetTester tester) async {
+    await tester.runAsync(() async {
+      final database = _newConnection();
+      try {
+        await database
+            .update(database.mails)
+            .write(
+              MailsCompanion(
+                bodyText: const Value(null),
+                links: const Value(null),
+                bodyClearedAt: Value(now.toUtc().millisecondsSinceEpoch),
+              ),
+            );
       } finally {
         await database.close();
       }

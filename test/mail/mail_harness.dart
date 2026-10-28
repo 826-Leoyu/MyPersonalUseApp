@@ -87,6 +87,18 @@ class MailHarness {
     await mail.scanFolder();
   }
 
+  /// 直接改数据库，清除邮件 [mailId] 的正文和链接，模拟正文到期后被清除。
+  Future<void> clearBody(String mailId) =>
+      (_database.update(
+        _database.mails,
+      )..where((m) => m.id.equals(mailId))).write(
+        MailsCompanion(
+          bodyText: const Value(null),
+          links: const Value(null),
+          bodyClearedAt: Value(now.toUtc().millisecondsSinceEpoch),
+        ),
+      );
+
   /// 写一个文件并导入。
   Future<ImportOutcome> importJson(String name, Object? content) =>
       mail.importFile(writeFile(name, content));
