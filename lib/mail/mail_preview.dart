@@ -1,5 +1,8 @@
 import 'body_text.dart';
 
+/// 邮件正文已经清除时的提示。
+const bodyClearedMessage = '原文已清理，请在 Outlook 中查看';
+
 /// 邮件预览列表里的一封邮件。
 class MailPreview {
   const MailPreview({

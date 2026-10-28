@@ -1,5 +1,6 @@
-// 数据库迁移（M-1）：用 v1、v2、v3、v4 的数据库升级，旧数据通过 PlannerService 读回来
-// 都一样。
+// 数据库迁移（M-1）：用 v1、v2、v3、v4 的数据库升级，旧数据读回来都一样。
+// 卡片和连线通过 PlannerService 读，导入过的文件和邮件通过 MailService 读；
+// 只删列的迁移（v4 → v5）直接读表，并检查外键还都对得上。
 //
 // generated_migrations/ 和 drift_schemas/ 由 drift_dev 生成。改了表结构、
 // 升了 schemaVersion 以后重新生成：
