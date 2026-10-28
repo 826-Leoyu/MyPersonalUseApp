@@ -232,7 +232,7 @@ void main() {
   });
 
   group('同一讨论有新邮件', () {
-    test('按 30 天算的邮件顺延到新邮件收件以后 30 天', () async {
+    test('按 30 天算的邮件延后到新邮件收件以后 30 天', () async {
       await importAndAnalyze([mail('Form')]);
       await importAndAnalyze([
         mail('RE: Form', at: '2026-11-10T08:00:00Z'),
@@ -247,8 +247,27 @@ void main() {
       expect((await detail('RE: Form')).bodyCleared, isTrue);
     });
 
+    test('新邮件没有收件时间：按它的导入时间延后', () async {
+      await importAndAnalyze([mail('Form')]);
+      h.now = DateTime.utc(2026, 11, 10, 8).toLocal();
+      await importAndAnalyze([
+        fakeMessage(
+          internetMessageId: '<untimed@example.com>',
+          conversationId: 'conv-a',
+          subject: 'RE: Form',
+          receivedDateTime: null,
+        ),
+      ]);
+
+      await scanAt(DateTime.utc(2026, 12, 10, 7, 59));
+      expect((await detail('Form')).bodyCleared, isFalse);
+
+      await scanAt(DateTime.utc(2026, 12, 10, 8, 1));
+      expect((await detail('Form')).bodyCleared, isTrue);
+    });
+
     test('新邮件的导出文件在旧邮件到期以后才读到：同一次扫描里先导入再清除，'
-        '旧邮件照样顺延', () async {
+        '旧邮件照样延后', () async {
       await importAndAnalyze([mail('Form')]);
       h.writeFile(
         'mail-late.json',
@@ -262,7 +281,7 @@ void main() {
     });
 
     test('候选被后续邮件改写以后，原来那封邮件没有事项了：按收件后 30 天算，'
-        '随同一讨论顺延', () async {
+        '随同一讨论延后', () async {
       h.analyzer.returns(
         'Form',
         actionRequired([
@@ -293,7 +312,7 @@ void main() {
       expect((await detail('Form')).bodyCleared, isTrue);
     });
 
-    test('按事项时间算的邮件不顺延', () async {
+    test('按事项时间算的邮件不延后', () async {
       h.analyzer.returns(
         'Form',
         actionRequired([

@@ -6,6 +6,7 @@ import '../board/read_failure_view.dart';
 import '../formatting/date_format.dart';
 import '../planner/planner_exceptions.dart';
 import 'mail_items.dart';
+import 'mail_preview.dart';
 import 'mail_service.dart';
 
 /// "已过滤的邮件"：没有生成候选事项的邮件和被忽略的事项，每条有主题、发件人、
@@ -57,9 +58,8 @@ class _FilteredTileState extends ConsumerState<_FilteredTile> {
 
   Future<void> _markUseful() async {
     if (widget.entry.bodyCleared) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        const SnackBar(content: Text(MailService.bodyClearedMessage)),
-      );
+      ScaffoldMessenger.maybeOf(context)
+          ?.showSnackBar(const SnackBar(content: Text(bodyClearedMessage)));
       return;
     }
     await _run(

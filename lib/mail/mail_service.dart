@@ -15,6 +15,7 @@ import '../planner/planner_exceptions.dart';
 import '../planner/planner_service.dart';
 import '../planner/task_card.dart';
 import '../storage/planner_database.dart';
+import 'body_retention.dart';
 import 'body_text.dart';
 import 'export_parser.dart';
 import 'export_source.dart';
@@ -126,15 +127,6 @@ class MailService {
 
   /// 输出格式不对累计多少次以后标为失败。
   static const maxInvalidOutputs = 3;
-
-  /// 有明确时间的邮件，正文保留到最晚的那个时间以后多久。
-  static const keepTimedBodyFor = Duration(days: 7);
-
-  /// 没有明确时间的邮件，正文保留到收件以后多久。
-  static const keepUntimedBodyFor = Duration(days: 30);
-
-  /// 邮件正文已经清除时的提示。
-  static const bodyClearedMessage = '原文已清理，请在 Outlook 中查看';
 
   final PlannerService _planner;
   final PlannerDatabase _db;
@@ -271,7 +263,7 @@ class MailService {
   });
 
   Future<void> _scan() async {
-    // 先导入：同一讨论的新邮件要先入库，旧邮件才能顺延。找不到文件夹时也
+    // 先导入：同一讨论的新邮件要先入库，旧邮件的正文才能延后到期。找不到文件夹时也
     // 照样清除。
     await _importFromFolder();
     await _clearExpiredBodies();
@@ -391,58 +383,16 @@ class MailService {
   /// 清除到期的正文和链接，其他字段保留（spec 0002"正文保留规则"）。
   Future<void> _clearExpiredBodies() => _write(() async {
     final now = _nowMillis;
-    // 待分析的邮件还要用正文，不清除。
-    final mails =
-        await (_db.select(_db.mails)..where(
-              (m) =>
-                  m.bodyClearedAt.isNull() &
-                  m.analysisStatus
-                      .equalsValue(MailAnalysisStatus.pending)
-                      .not(),
-            ))
-            .get();
-    final items = _db.mailItems;
-    final cards = _db.taskCards;
-    final rows = await (_db.select(items).join([
-      leftOuterJoin(cards, cards.id.equalsExp(items.cardId)),
-    ])..where(items.mailId.isIn([for (final m in mails) m.id]))).get();
-    // 每封邮件的事项的时间；已加入的事项以卡片上的为准。
-    final times = <String, List<CardTimes>>{};
-    // 加入的卡片还在画布上、没完成的邮件，不清除。
-    final openCards = <String>{};
-    for (final row in rows) {
-      final item = row.readTable(items);
-      final card = row.readTableOrNull(cards);
-      if (card != null &&
-          card.status == CardStatus.active &&
-          card.deletedAt == null) {
-        openCards.add(item.mailId);
-      }
-      (times[item.mailId] ??= []).add(
-        card != null
-            ? _cardTimes(card)
-            : (event: _itemEventTime(item), due: _itemDueTime(item)),
-      );
-    }
-    // 每个讨论里最晚的收件时间。
-    final latest = _db.mails.receivedAt.max();
-    final conversations =
-        await (_db.selectOnly(_db.mails)
-              ..addColumns([_db.mails.conversationId, latest])
-              ..where(_db.mails.conversationId.isNotNull())
-              ..groupBy([_db.mails.conversationId]))
-            .get();
-    final latestReceived = {
-      for (final row in conversations)
-        row.read(_db.mails.conversationId)!: row.read(latest),
-    };
+    final mails = await (_db.select(_db.mails)..where(_bodyKept)).get();
+    final (:times, :mailsWithOpenCards) = await _itemTimesOfKeptBodies();
+    final latest = await _latestInConversations();
     final expired = [
       for (final mail in mails)
-        if (!openCards.contains(mail.id) &&
-            _bodyExpiresAt(
+        if (!mailsWithOpenCards.contains(mail.id) &&
+            bodyExpiresAt(
                   mail,
                   times[mail.id] ?? const [],
-                  latestInConversation: latestReceived[mail.conversationId],
+                  latestInConversation: latest[mail.conversationId],
                 ) <=
                 now)
           mail.id,
@@ -457,35 +407,49 @@ class MailService {
     );
   });
 
-  /// 邮件 [mail] 的正文到期时间：[times] 是它分析出的事项的时间，有明确
-  /// 时间时取最晚的那个之后 [keepTimedBodyFor]；没有时为收件以后
-  /// [keepUntimedBodyFor]，同一讨论有更晚的邮件（[latestInConversation]）
-  /// 时从那封的收件时间算起。
-  static int _bodyExpiresAt(
-    MailRow mail,
-    List<CardTimes> times, {
-    required int? latestInConversation,
-  }) {
-    final keepFrom = [
-      for (final (:event, :due) in times)
-        for (final time in [event, due]) ?_bodyKeepFrom(time),
-    ];
-    if (keepFrom.isNotEmpty) {
-      return keepFrom.reduce(max) + keepTimedBodyFor.inMilliseconds;
+  /// 正文还在、可能要清除的邮件。待分析的邮件还要用正文，不清除。
+  static Expression<bool> _bodyKept($MailsTable m) =>
+      m.bodyClearedAt.isNull() &
+      m.analysisStatus.equalsValue(MailAnalysisStatus.pending).not();
+
+  /// [_bodyKept] 的邮件的事项时间，按邮件 id；已加入的事项以卡片上的为准。
+  /// 另外给出加入的卡片还在画布上、没完成的邮件，它们不清除。
+  Future<({Map<String, List<CardTimes>> times, Set<String> mailsWithOpenCards})>
+  _itemTimesOfKeptBodies() async {
+    final items = _db.mailItems;
+    final cards = _db.taskCards;
+    final rows = await (_db.select(items).join([
+      innerJoin(_db.mails, _db.mails.id.equalsExp(items.mailId)),
+      leftOuterJoin(cards, cards.id.equalsExp(items.cardId)),
+    ])..where(_bodyKept(_db.mails))).get();
+    final times = <String, List<CardTimes>>{};
+    final mailsWithOpenCards = <String>{};
+    for (final row in rows) {
+      final item = row.readTable(items);
+      final card = row.readTableOrNull(cards);
+      if (_isOpen(card)) mailsWithOpenCards.add(item.mailId);
+      (times[item.mailId] ??= []).add(
+        card != null
+            ? _cardTimes(card)
+            : (event: _itemEventTime(item), due: _itemDueTime(item)),
+      );
     }
-    final received = mail.receivedAt ?? mail.importedAt;
-    return max(received, latestInConversation ?? received) +
-        keepUntimedBodyFor.inMilliseconds;
+    return (times: times, mailsWithOpenCards: mailsWithOpenCards);
   }
 
-  /// 正文保留时从什么时候算起：有时刻时就是那个时刻，只有日期时是那一天
-  /// 结束（本地时间第二天 0 点）。没有值时为 null。
-  static int? _bodyKeepFrom(CardTime? time) {
-    if (time?.time case final at?) return at.millisecondsSinceEpoch;
-    if (time?.day case final day?) {
-      return DateTime(day.year, day.month, day.day + 1).millisecondsSinceEpoch;
-    }
-    return null;
+  /// 每个讨论里最晚的邮件的时间（见 [untimedKeepFrom]），按讨论 id。
+  Future<Map<String, int?>> _latestInConversations() async {
+    final mails = _db.mails;
+    final latest = coalesce([mails.receivedAt, mails.importedAt]).max();
+    final rows =
+        await (_db.selectOnly(mails)
+              ..addColumns([mails.conversationId, latest])
+              ..where(mails.conversationId.isNotNull())
+              ..groupBy([mails.conversationId]))
+            .get();
+    return {
+      for (final row in rows) row.read(mails.conversationId)!: row.read(latest),
+    };
   }
 
   /// 删除导入超过 14 天、其中的邮件都不再待分析的导出文件。格式错误的文件
@@ -1152,10 +1116,7 @@ class MailService {
       final card = row.readTableOrNull(cards);
       final open = switch (item.status) {
         MailItemStatus.candidate => true,
-        MailItemStatus.accepted =>
-          card != null &&
-              card.status == CardStatus.active &&
-              card.deletedAt == null,
+        MailItemStatus.accepted => _isOpen(card),
         MailItemStatus.ignored => false,
       };
       if (!open && item.conversationId != mail.conversationId) continue;
@@ -1331,12 +1292,14 @@ class MailService {
     final card = await (_db.select(
       _db.taskCards,
     )..where((c) => c.id.equals(cardId))).getSingleOrNull();
-    return card != null &&
-            card.status == CardStatus.active &&
-            card.deletedAt == null
-        ? card
-        : null;
+    return _isOpen(card) ? card : null;
   }
+
+  /// 卡片 [card] 在画布上、没完成、不在回收站。
+  static bool _isOpen(TaskCardRow? card) =>
+      card != null &&
+      card.status == CardStatus.active &&
+      card.deletedAt == null;
 
   Future<void> _insertCandidate(
     MailRow mail,

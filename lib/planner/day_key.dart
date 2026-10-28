@@ -54,6 +54,9 @@ class DayKey implements Comparable<DayKey> {
     return DayKey._(shifted.year, shifted.month, shifted.day);
   }
 
+  /// 这一天结束的时刻：本地时间第二天 0 点。
+  DateTime get endsAt => DateTime(year, month, day + 1);
+
   @override
   int compareTo(DayKey other) {
     if (year != other.year) return year.compareTo(other.year);
