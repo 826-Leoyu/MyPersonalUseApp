@@ -83,6 +83,23 @@ void main() {
       expect(cleared.preview.subject, 'Form');
       expect(await candidateTitles(), ['填表']);
     });
+
+    test('没有收件时间：导入后 30 天到期', () async {
+      h.now = DateTime.utc(2026, 10, 20, 8).toLocal();
+      await importAndAnalyze([
+        fakeMessage(
+          internetMessageId: '<untimed@example.com>',
+          subject: 'Untimed',
+          receivedDateTime: null,
+        ),
+      ]);
+
+      await scanAt(DateTime.utc(2026, 11, 19, 7, 59));
+      expect((await detail('Untimed')).bodyCleared, isFalse);
+
+      await scanAt(DateTime.utc(2026, 11, 19, 8));
+      expect((await detail('Untimed')).bodyCleared, isTrue);
+    });
   });
 
   test('找不到邮件文件夹时也照样清除', () async {

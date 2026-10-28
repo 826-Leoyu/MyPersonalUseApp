@@ -397,9 +397,7 @@ class MailService {
                 now)
           mail.id,
     ];
-    // SQLite 一条语句的参数个数有上限，分批清除。
-    for (var i = 0; i < expired.length; i += 500) {
-      final chunk = expired.sublist(i, min(i + 500, expired.length));
+    for (final chunk in _inBatches(expired)) {
       await (_db.update(_db.mails)..where((m) => m.id.isIn(chunk))).write(
         MailsCompanion(
           bodyText: const Value(null),
@@ -409,6 +407,14 @@ class MailService {
       );
     }
   });
+
+  /// [list] 分成每批至多 500 个。SQLite 一条语句的参数个数有上限，
+  /// `isIn` 的列表长时要分批。
+  static Iterable<List<T>> _inBatches<T>(List<T> list) sync* {
+    for (var i = 0; i < list.length; i += 500) {
+      yield list.sublist(i, min(i + 500, list.length));
+    }
+  }
 
   /// 正文还在、可能要清除的邮件。待分析的邮件还要用正文，不清除。
   static Expression<bool> _bodyClearable($MailsTable m) =>
@@ -810,10 +816,7 @@ class MailService {
   /// [keys] 里已经在 [mailbox] 里入库的邮件键。
   Future<Set<String>> _knownKeys(String mailbox, Set<String> keys) async {
     final known = <String>{};
-    // SQLite 一条语句的参数个数有上限，分批查。
-    final list = keys.toList();
-    for (var i = 0; i < list.length; i += 500) {
-      final chunk = list.sublist(i, min(i + 500, list.length));
+    for (final chunk in _inBatches(keys.toList())) {
       final rows =
           await (_db.selectOnly(_db.mails)
                 ..addColumns([_db.mails.mailKey])
