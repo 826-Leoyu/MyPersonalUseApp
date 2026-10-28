@@ -123,6 +123,12 @@ final mailAnalyzerProvider = Provider<MailAnalyzer>(
   (ref) => ClaudeCodeAnalyzer(),
 );
 
+/// 检查本机的 Claude Code 装了没有、登录了没有（向导第 3 步）。测试里换成
+/// 直接返回结果。
+final claudeCodeStatusProvider = Provider<Future<ClaudeCodeStatus> Function()>(
+  (ref) => ClaudeCodeAnalyzer().checkStatus,
+);
+
 /// 打开邮件文件夹的方式。测试里换成内存里的假文件夹。
 final mailExportSourceProvider = Provider<ExportSource Function(String)>(
   (ref) => DirectoryExportSource.new,

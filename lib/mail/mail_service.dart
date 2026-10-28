@@ -25,6 +25,7 @@ import 'item_updates.dart';
 import 'mail_analyzer.dart';
 import 'mail_items.dart';
 import 'mail_preview.dart';
+import 'mail_setup.dart';
 import 'mail_states.dart';
 
 /// 导入一个导出文件的结果。
@@ -104,6 +105,8 @@ class MailService {
   static const _autoAnalysisDayKey = 'autoAnalysisDay';
   static const _autoAnalysisCountKey = 'autoAnalysisCount';
   static const _autoAnalysisResumedDayKey = 'autoAnalysisResumedDay';
+  static const _consentAtKey = 'mailConsentAt';
+  static const _setupCompletedKey = 'mailSetupCompleted';
 
   /// 云端流程每次导出多少封（流程里的 Top）。文件里正好这么多封时算满的。
   static const exportBatchSize = 200;
@@ -245,6 +248,62 @@ class MailService {
     if (await _meta(_firstSetupAtKey) case final at?) return int.parse(at);
     await _setMeta(_firstSetupAtKey, '$_nowMillis');
     return _nowMillis;
+  }
+
+  // ---- 首次设置向导 ----
+
+  /// 向导该从哪一步开始：第一个没做完的。同意和文件夹看有没有同意时间、
+  /// 有没有选文件夹（在设置页选的也算）；后两步看向导里有没有做完。
+  Future<SetupStep> setupStep() => _read(() async {
+    if (await _meta(_consentAtKey) == null) return SetupStep.consent;
+    if (await _meta(_mailFolderKey) == null) return SetupStep.folder;
+    return switch (await _meta(_setupCompletedKey)) {
+      final name? when name == SetupStep.trial.name => SetupStep.done,
+      final name? when name == SetupStep.claude.name => SetupStep.trial,
+      _ => SetupStep.claude,
+    };
+  });
+
+  /// 她同意的时间（UTC），还没同意时为 null。
+  Future<DateTime?> consentedAt() => _read(
+    () async => _fromMillis(int.tryParse(await _meta(_consentAtKey) ?? '')),
+  );
+
+  /// 向导第 1 步：她勾选了同意。记下第一次同意的时间，以后再同意不变。
+  Future<void> agreeToMailUse() => _write(() async {
+    if (await _meta(_consentAtKey) == null) {
+      await _setMeta(_consentAtKey, '$_nowMillis');
+    }
+  });
+
+  /// 向导第 3 步做完了：Claude Code 检查过了。
+  Future<void> completeClaudeCheck() => _write(() async {
+    if (await _meta(_setupCompletedKey) == null) {
+      await _setMeta(_setupCompletedKey, SetupStep.claude.name);
+    }
+  });
+
+  /// 向导第 4 步：用内置的虚构示例邮件（见 [sampleAnalysisRequest]）试分析
+  /// 一次。示例邮件不入库，不计入每天的上限。成功时向导做完，并且和别的
+  /// 邮件分析成功一样，等着装好、登录 Claude Code 或者等额度的邮件接着
+  /// 分析；失败时抛出 [AnalysisFailed]。首次设置时间不变。
+  Future<AnalysisResult> analyzeSample() async {
+    final analyzer = _analyzer;
+    if (analyzer == null) {
+      throw const AnalysisFailed(AnalysisFailureType.notInstalled);
+    }
+    final result = await analyzer.analyze(
+      sampleAnalysisRequest(now: _clock.now(), timeZone: _timeZoneName()),
+    );
+    await _write(() async {
+      await _setMeta(_setupCompletedKey, SetupStep.trial.name);
+      await _forgetFailures([
+        ..._userFixableFailures,
+        AnalysisFailureType.quotaExhausted.name,
+      ]);
+    });
+    unawaited(analyzePending());
+    return result;
   }
 
   /// 解析失败的文件稳定多久以后算格式错误；之前当作还在同步。
