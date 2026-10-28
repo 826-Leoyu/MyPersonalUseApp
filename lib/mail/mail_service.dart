@@ -127,6 +127,12 @@ class MailService {
   /// 输出格式不对累计多少次以后标为失败。
   static const maxInvalidOutputs = 3;
 
+  /// 有明确时间的邮件，正文保留到最晚的那个时间以后多久。
+  static const keepTimedBodyFor = Duration(days: 7);
+
+  /// 没有明确时间的邮件，正文保留到收件以后多久。
+  static const keepUntimedBodyFor = Duration(days: 30);
+
   /// 邮件正文已经清除时的提示。
   static const bodyClearedMessage = '原文已清理，请在 Outlook 中查看';
 
@@ -265,6 +271,13 @@ class MailService {
   });
 
   Future<void> _scan() async {
+    // 先导入：同一讨论的新邮件要先入库，旧邮件才能顺延。找不到文件夹时也
+    // 照样清除。
+    await _importFromFolder();
+    await _clearExpiredBodies();
+  }
+
+  Future<void> _importFromFolder() async {
     final folder = await mailFolder();
     if (folder == null) return;
     final source = _openFolder(folder);
@@ -373,6 +386,106 @@ class MailService {
     }
     await _deleteOldFiles(source);
     if (importedFiles > 0) unawaited(analyzePending());
+  }
+
+  /// 清除到期的正文和链接，其他字段保留（spec 0002"正文保留规则"）。
+  Future<void> _clearExpiredBodies() => _write(() async {
+    final now = _nowMillis;
+    // 待分析的邮件还要用正文，不清除。
+    final mails =
+        await (_db.select(_db.mails)..where(
+              (m) =>
+                  m.bodyClearedAt.isNull() &
+                  m.analysisStatus
+                      .equalsValue(MailAnalysisStatus.pending)
+                      .not(),
+            ))
+            .get();
+    final items = _db.mailItems;
+    final cards = _db.taskCards;
+    final rows = await (_db.select(items).join([
+      leftOuterJoin(cards, cards.id.equalsExp(items.cardId)),
+    ])..where(items.mailId.isIn([for (final m in mails) m.id]))).get();
+    // 每封邮件的事项的时间；已加入的事项以卡片上的为准。
+    final times = <String, List<CardTimes>>{};
+    // 加入的卡片还在画布上、没完成的邮件，不清除。
+    final openCards = <String>{};
+    for (final row in rows) {
+      final item = row.readTable(items);
+      final card = row.readTableOrNull(cards);
+      if (card != null &&
+          card.status == CardStatus.active &&
+          card.deletedAt == null) {
+        openCards.add(item.mailId);
+      }
+      (times[item.mailId] ??= []).add(
+        card != null
+            ? _cardTimes(card)
+            : (event: _itemEventTime(item), due: _itemDueTime(item)),
+      );
+    }
+    // 每个讨论里最晚的收件时间。
+    final latest = _db.mails.receivedAt.max();
+    final conversations =
+        await (_db.selectOnly(_db.mails)
+              ..addColumns([_db.mails.conversationId, latest])
+              ..where(_db.mails.conversationId.isNotNull())
+              ..groupBy([_db.mails.conversationId]))
+            .get();
+    final latestReceived = {
+      for (final row in conversations)
+        row.read(_db.mails.conversationId)!: row.read(latest),
+    };
+    final expired = [
+      for (final mail in mails)
+        if (!openCards.contains(mail.id) &&
+            _bodyExpiresAt(
+                  mail,
+                  times[mail.id] ?? const [],
+                  latestInConversation: latestReceived[mail.conversationId],
+                ) <=
+                now)
+          mail.id,
+    ];
+    if (expired.isEmpty) return;
+    await (_db.update(_db.mails)..where((m) => m.id.isIn(expired))).write(
+      MailsCompanion(
+        bodyText: const Value(null),
+        links: const Value(null),
+        bodyClearedAt: Value(now),
+      ),
+    );
+  });
+
+  /// 邮件 [mail] 的正文到期时间：[times] 是它分析出的事项的时间，有明确
+  /// 时间时取最晚的那个之后 [keepTimedBodyFor]；没有时为收件以后
+  /// [keepUntimedBodyFor]，同一讨论有更晚的邮件（[latestInConversation]）
+  /// 时从那封的收件时间算起。
+  static int _bodyExpiresAt(
+    MailRow mail,
+    List<CardTimes> times, {
+    required int? latestInConversation,
+  }) {
+    final keepFrom = [
+      for (final (:event, :due) in times)
+        for (final time in [event, due]) ?_bodyKeepFrom(time),
+    ];
+    if (keepFrom.isNotEmpty) {
+      return keepFrom.reduce(max) + keepTimedBodyFor.inMilliseconds;
+    }
+    final received = mail.receivedAt ?? mail.importedAt;
+    return max(received, latestInConversation ?? received) +
+        keepUntimedBodyFor.inMilliseconds;
+  }
+
+  /// 正文保留时从什么时候算起：有时刻时就是那个时刻，只有日期时是那一天
+  /// 结束（本地时间第二天 0 点）。没有值时为 null。
+  static int? _bodyKeepFrom(CardTime? time) {
+    if (time?.time case final at?) return at.millisecondsSinceEpoch;
+    if (time?.day case final day?) {
+      return DateTime(day.year, day.month, day.day + 1).millisecondsSinceEpoch;
+    }
+    return null;
   }
 
   /// 删除导入超过 14 天、其中的邮件都不再待分析的导出文件。格式错误的文件
@@ -1830,6 +1943,7 @@ class MailService {
         hasInlineImages: row.hasInlineImages,
         possiblyIncomplete: row.bodyPossiblyIncomplete,
       ),
+      bodyCleared: row.bodyClearedAt != null,
     );
   });
 
