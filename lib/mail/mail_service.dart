@@ -263,8 +263,8 @@ class MailService {
   });
 
   Future<void> _scan() async {
-    // 先导入：同一讨论的新邮件要先入库，旧邮件的正文才能延后到期。找不到文件夹时也
-    // 照样清除。
+    // 先导入：同一讨论的新邮件要先入库，旧邮件的正文才能延后到期。找不到
+    // 文件夹时也照样清除。
     await _importFromFolder();
     await _clearExpiredBodies();
   }
@@ -383,8 +383,8 @@ class MailService {
   /// 清除到期的正文和链接，其他字段保留（spec 0002"正文保留规则"）。
   Future<void> _clearExpiredBodies() => _write(() async {
     final now = _nowMillis;
-    final mails = await (_db.select(_db.mails)..where(_bodyKept)).get();
-    final (:times, :mailsWithOpenCards) = await _itemTimesOfKeptBodies();
+    final mails = await (_db.select(_db.mails)..where(_bodyClearable)).get();
+    final (:times, :mailsWithOpenCards) = await _itemTimesOfClearableBodies();
     final latest = await _latestInConversations();
     final expired = [
       for (final mail in mails)
@@ -397,31 +397,34 @@ class MailService {
                 now)
           mail.id,
     ];
-    if (expired.isEmpty) return;
-    await (_db.update(_db.mails)..where((m) => m.id.isIn(expired))).write(
-      MailsCompanion(
-        bodyText: const Value(null),
-        links: const Value(null),
-        bodyClearedAt: Value(now),
-      ),
-    );
+    // SQLite 一条语句的参数个数有上限，分批清除。
+    for (var i = 0; i < expired.length; i += 500) {
+      final chunk = expired.sublist(i, min(i + 500, expired.length));
+      await (_db.update(_db.mails)..where((m) => m.id.isIn(chunk))).write(
+        MailsCompanion(
+          bodyText: const Value(null),
+          links: const Value(null),
+          bodyClearedAt: Value(now),
+        ),
+      );
+    }
   });
 
   /// 正文还在、可能要清除的邮件。待分析的邮件还要用正文，不清除。
-  static Expression<bool> _bodyKept($MailsTable m) =>
+  static Expression<bool> _bodyClearable($MailsTable m) =>
       m.bodyClearedAt.isNull() &
       m.analysisStatus.equalsValue(MailAnalysisStatus.pending).not();
 
-  /// [_bodyKept] 的邮件的事项时间，按邮件 id；已加入的事项以卡片上的为准。
+  /// [_bodyClearable] 的邮件的事项时间，按邮件 id；已加入的事项以卡片上的为准。
   /// 另外给出加入的卡片还在画布上、没完成的邮件，它们不清除。
   Future<({Map<String, List<CardTimes>> times, Set<String> mailsWithOpenCards})>
-  _itemTimesOfKeptBodies() async {
+  _itemTimesOfClearableBodies() async {
     final items = _db.mailItems;
     final cards = _db.taskCards;
     final rows = await (_db.select(items).join([
       innerJoin(_db.mails, _db.mails.id.equalsExp(items.mailId)),
       leftOuterJoin(cards, cards.id.equalsExp(items.cardId)),
-    ])..where(_bodyKept(_db.mails))).get();
+    ])..where(_bodyClearable(_db.mails))).get();
     final times = <String, List<CardTimes>>{};
     final mailsWithOpenCards = <String>{};
     for (final row in rows) {
@@ -437,7 +440,7 @@ class MailService {
     return (times: times, mailsWithOpenCards: mailsWithOpenCards);
   }
 
-  /// 每个讨论里最晚的邮件的时间（见 [untimedKeepFrom]），按讨论 id。
+  /// 每个讨论里最晚的邮件的时间（收件时间，没有时用导入时间），按讨论 id。
   Future<Map<String, int?>> _latestInConversations() async {
     final mails = _db.mails;
     final latest = coalesce([mails.receivedAt, mails.importedAt]).max();

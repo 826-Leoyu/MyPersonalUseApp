@@ -1,10 +1,12 @@
+/// 正文保留规则里的计算。纯函数，不碰数据库。时间都是 UTC 毫秒。
+///
+/// 规则见 spec 0002 的"正文保留规则"。
+library;
+
 import 'dart:math';
 
 import '../planner/card_time.dart';
 import '../storage/planner_database.dart';
-
-// 正文保留规则（spec 0002"正文保留规则"）里的计算，不读写数据库。时间都是
-// UTC 毫秒。
 
 /// 有明确时间的邮件，正文保留到最晚的那个时间以后多久。
 const keepTimedBodyFor = Duration(days: 7);
@@ -14,10 +16,10 @@ const keepUntimedBodyFor = Duration(days: 30);
 
 /// 邮件 [mail] 按收件算时的时间：收件时间，没有时用导入时间。同一讨论
 /// 延后到期时，也按这个时间找讨论里最晚的邮件。
-int untimedKeepFrom(MailRow mail) => mail.receivedAt ?? mail.importedAt;
+int _untimedKeepFrom(MailRow mail) => mail.receivedAt ?? mail.importedAt;
 
 /// 邮件 [mail] 的正文到期时间：[times] 是它分析出的事项的时间，有明确
-/// 时间时取最晚的那个之后 [keepTimedBodyFor]；没有时为 [untimedKeepFrom]
+/// 时间时取最晚的那个之后 [keepTimedBodyFor]；没有时为 [_untimedKeepFrom]
 /// 以后 [keepUntimedBodyFor]，同一讨论有更晚的邮件（[latestInConversation]）
 /// 时从那封算起。
 int bodyExpiresAt(
@@ -32,7 +34,7 @@ int bodyExpiresAt(
   if (keepFrom.isNotEmpty) {
     return keepFrom.reduce(max) + keepTimedBodyFor.inMilliseconds;
   }
-  final own = untimedKeepFrom(mail);
+  final own = _untimedKeepFrom(mail);
   return max(own, latestInConversation ?? own) +
       keepUntimedBodyFor.inMilliseconds;
 }
