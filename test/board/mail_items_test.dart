@@ -322,6 +322,21 @@ void main() {
     await harness.dispose(tester);
   });
 
+  windowsTest('正文已清除时，打开原邮件显示"原文已清理，请在 Outlook 中查看"', (tester) async {
+    harness.analyzer.returns('Report due', actionRequired([fakeItem('交周报')]));
+    await harness.seedMail(tester, [mail('Report due')]);
+    await harness.clearMailBodies(tester);
+    await harness.launch(tester);
+
+    await tapAndSettle(tester, find.text('交周报'));
+    await tapAndSettle(tester, find.text('查看原邮件'));
+
+    expect(find.byType(MailDetailPage), findsOneWidget);
+    expect(find.text('原文已清理，请在 Outlook 中查看'), findsOneWidget);
+    expect(find.text('（没有正文）'), findsNothing);
+    await harness.dispose(tester);
+  });
+
   windowsTest('邮件有附件时，事项上提示"附件或图片未分析"', (tester) async {
     harness.analyzer.returns('Report due', actionRequired([fakeItem('交周报')]));
     await harness.seedMail(tester, [

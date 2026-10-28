@@ -29,8 +29,15 @@ class MailPreview {
 
 /// 邮件预览里点开的一封邮件：转换后的正文和链接。
 class MailDetail {
-  const MailDetail({required this.preview, required this.body});
+  const MailDetail({
+    required this.preview,
+    required this.body,
+    required this.bodyCleared,
+  });
 
   final MailPreview preview;
   final MailBody body;
+
+  /// 正文到期、已经清除（spec 0002"正文保留规则"）。
+  final bool bodyCleared;
 }

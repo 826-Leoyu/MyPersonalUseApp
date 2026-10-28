@@ -156,7 +156,8 @@ class Mails extends Table {
 
   /// JSON 数组，分析结果用下标引用。
   TextColumn get links => text().nullable()();
-  IntColumn get bodyExpiresAt => integer().nullable()();
+
+  /// 正文到期时间每次扫描时现算，不存（schemaVersion 5 删掉了这一列）。
   IntColumn get bodyClearedAt => integer().nullable()();
   TextColumn get analysisStatus => textEnum<MailAnalysisStatus>()();
   TextColumn get analysisFailureType => text().nullable()();
@@ -271,7 +272,7 @@ class PlannerDatabase extends _$PlannerDatabase {
   PlannerDatabase(super.executor);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -282,7 +283,8 @@ class PlannerDatabase extends _$PlannerDatabase {
       );
     },
     onUpgrade: (m, from, to) async {
-      // 只新增表和可为空或有默认值的列，旧数据不受影响。
+      // 只新增表和可为空或有默认值的列，旧数据不受影响。例外：v5 删掉了
+      // 一直为空的 mails.body_expires_at。
       if (from < 2) {
         for (final column in [
           taskCards.eventTime,
@@ -313,6 +315,10 @@ class PlannerDatabase extends _$PlannerDatabase {
             newColumns: [mailExportFiles.unchangedSince],
           ),
         );
+      }
+      if (from >= 3 && from < 5) {
+        // 去掉一直为空的正文到期时间列，要重建表；其他数据原样保留。
+        await m.alterTable(TableMigration(mails));
       }
       await into(appMeta).insertOnConflictUpdate(
         AppMetaCompanion.insert(key: 'schemaVersion', value: '$to'),

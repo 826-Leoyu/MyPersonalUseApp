@@ -5,6 +5,7 @@ import '../app/providers.dart';
 import '../board/read_failure_view.dart';
 import '../formatting/date_format.dart';
 import 'mail_preview.dart';
+import 'mail_service.dart';
 
 /// 邮件预览里点开的一封邮件：转换后的正文、编号的链接和正文的提示，用来检查
 /// HTML 转文本的结果。
@@ -73,7 +74,11 @@ class _MailDetailView extends StatelessWidget {
           ),
         ],
         const Divider(height: 32),
-        SelectableText(body.text ?? '（没有正文）'),
+        SelectableText(
+          detail.bodyCleared
+              ? MailService.bodyClearedMessage
+              : body.text ?? '（没有正文）',
+        ),
         if (body.links.isNotEmpty) ...[
           const Divider(height: 32),
           Text('链接', style: textTheme.titleSmall),

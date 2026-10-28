@@ -1,4 +1,4 @@
-// 数据库迁移（M-1）：用 v1、v2、v3 的数据库升级，旧数据通过 PlannerService 读回来
+// 数据库迁移（M-1）：用 v1、v2、v3、v4 的数据库升级，旧数据通过 PlannerService 读回来
 // 都一样。
 //
 // generated_migrations/ 和 drift_schemas/ 由 drift_dev 生成。改了表结构、
@@ -9,6 +9,7 @@ import 'dart:io';
 
 import 'package:clock/clock.dart';
 import 'package:crypto/crypto.dart';
+import 'package:drift/drift.dart' show OrderingTerm;
 import 'package:drift_dev/api/migrations_native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:my_personal_use_app/mail/mail_service.dart';
@@ -33,12 +34,12 @@ void main() {
   int millis(DateTime time) => time.toUtc().millisecondsSinceEpoch;
   final created = millis(now.subtract(const Duration(days: 2)));
 
-  for (final from in [1, 2, 3]) {
-    test('结构从 v$from 升级到 v4 后和新建的 v4 数据库一样', () async {
+  for (final from in [1, 2, 3, 4]) {
+    test('结构从 v$from 升级到 v5 后和新建的 v5 数据库一样', () async {
       final schema = await verifier.schemaAt(from);
       final db = PlannerDatabase(schema.newConnection());
 
-      await verifier.migrateAndValidate(db, 4);
+      await verifier.migrateAndValidate(db, 5);
       await db.close();
     });
   }
@@ -258,6 +259,56 @@ void main() {
     addTearDown(() => directory.deleteSync(recursive: true));
     final file = File('${directory.path}/mail-1.json')..writeAsBytesSync(bytes);
     expect(await mail.importFile(file.path), isA<AlreadyImported>());
+
+    await db.close();
+  });
+
+  test('从 v4 升级到 v5 后，邮件的正文、链接和清除时间都还在', () async {
+    final schema = await verifier.schemaAt(4);
+    final v4 = schema.rawDatabase;
+    v4.execute(
+      'INSERT INTO mail_export_files (id, file_name, status, first_seen_at) '
+      "VALUES ('file', 'mail-1.json', 'imported', ?)",
+      [created],
+    );
+    void insertMail(String id, {String? body, int? clearedAt}) => v4.execute(
+      'INSERT INTO mails (id, mailbox, mail_key, mail_key_kind, subject, '
+      'body_text, links, body_cleared_at, analysis_status, source_file_id, '
+      'imported_at) '
+      "VALUES (?, 'her@example.com', ?, 'internetMessageId', ?, ?, ?, ?, "
+      "'done', 'file', ?)",
+      [
+        id,
+        '<$id@example.com>',
+        '主题 $id',
+        body,
+        body == null ? null : '["https://example.com/$id"]',
+        clearedAt,
+        created,
+      ],
+    );
+    insertMail('kept', body: '正文还在');
+    insertMail('cleared', clearedAt: created + 1);
+    v4.execute(
+      'INSERT INTO mail_items (id, mail_id, title, status, created_at, '
+      "updated_at) VALUES ('item', 'kept', '事项', 'candidate', ?, ?)",
+      [created, created],
+    );
+    v4.execute(
+      "INSERT INTO app_meta (key, value) VALUES ('schemaVersion', '4')",
+    );
+
+    final db = PlannerDatabase(schema.newConnection());
+    final rows = await (db.select(
+      db.mails,
+    )..orderBy([(m) => OrderingTerm(expression: m.id)])).get();
+    expect(rows.map((m) => (m.id, m.bodyText, m.links, m.bodyClearedAt)), [
+      ('cleared', null, null, created + 1),
+      ('kept', '正文还在', '["https://example.com/kept"]', null),
+    ]);
+    final item = await db.select(db.mailItems).getSingle();
+    expect(item.mailId, 'kept');
+    expect(await db.customSelect('PRAGMA foreign_key_check').get(), isEmpty);
 
     await db.close();
   });

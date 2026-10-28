@@ -3940,17 +3940,6 @@ class $MailsTable extends Mails with TableInfo<$MailsTable, MailRow> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
-  static const VerificationMeta _bodyExpiresAtMeta = const VerificationMeta(
-    'bodyExpiresAt',
-  );
-  @override
-  late final GeneratedColumn<int> bodyExpiresAt = GeneratedColumn<int>(
-    'body_expires_at',
-    aliasedName,
-    true,
-    type: DriftSqlType.int,
-    requiredDuringInsert: false,
-  );
   static const VerificationMeta _bodyClearedAtMeta = const VerificationMeta(
     'bodyClearedAt',
   );
@@ -4095,7 +4084,6 @@ class $MailsTable extends Mails with TableInfo<$MailsTable, MailRow> {
     bodyText,
     bodyPossiblyIncomplete,
     links,
-    bodyExpiresAt,
     bodyClearedAt,
     analysisStatus,
     analysisFailureType,
@@ -4228,15 +4216,6 @@ class $MailsTable extends Mails with TableInfo<$MailsTable, MailRow> {
       context.handle(
         _linksMeta,
         links.isAcceptableOrUnknown(data['links']!, _linksMeta),
-      );
-    }
-    if (data.containsKey('body_expires_at')) {
-      context.handle(
-        _bodyExpiresAtMeta,
-        bodyExpiresAt.isAcceptableOrUnknown(
-          data['body_expires_at']!,
-          _bodyExpiresAtMeta,
-        ),
       );
     }
     if (data.containsKey('body_cleared_at')) {
@@ -4403,10 +4382,6 @@ class $MailsTable extends Mails with TableInfo<$MailsTable, MailRow> {
         DriftSqlType.string,
         data['${effectivePrefix}links'],
       ),
-      bodyExpiresAt: attachedDatabase.typeMapping.read(
-        DriftSqlType.int,
-        data['${effectivePrefix}body_expires_at'],
-      ),
       bodyClearedAt: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}body_cleared_at'],
@@ -4488,7 +4463,8 @@ class MailRow extends DataClass implements Insertable<MailRow> {
 
   /// JSON 数组，分析结果用下标引用。
   final String? links;
-  final int? bodyExpiresAt;
+
+  /// 正文到期时间每次扫描时现算，不存（schemaVersion 5 删掉了这一列）。
   final int? bodyClearedAt;
   final MailAnalysisStatus analysisStatus;
   final String? analysisFailureType;
@@ -4517,7 +4493,6 @@ class MailRow extends DataClass implements Insertable<MailRow> {
     this.bodyText,
     required this.bodyPossiblyIncomplete,
     this.links,
-    this.bodyExpiresAt,
     this.bodyClearedAt,
     required this.analysisStatus,
     this.analysisFailureType,
@@ -4568,9 +4543,6 @@ class MailRow extends DataClass implements Insertable<MailRow> {
     map['body_possibly_incomplete'] = Variable<bool>(bodyPossiblyIncomplete);
     if (!nullToAbsent || links != null) {
       map['links'] = Variable<String>(links);
-    }
-    if (!nullToAbsent || bodyExpiresAt != null) {
-      map['body_expires_at'] = Variable<int>(bodyExpiresAt);
     }
     if (!nullToAbsent || bodyClearedAt != null) {
       map['body_cleared_at'] = Variable<int>(bodyClearedAt);
@@ -4636,9 +4608,6 @@ class MailRow extends DataClass implements Insertable<MailRow> {
       links: links == null && nullToAbsent
           ? const Value.absent()
           : Value(links),
-      bodyExpiresAt: bodyExpiresAt == null && nullToAbsent
-          ? const Value.absent()
-          : Value(bodyExpiresAt),
       bodyClearedAt: bodyClearedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(bodyClearedAt),
@@ -4691,7 +4660,6 @@ class MailRow extends DataClass implements Insertable<MailRow> {
         json['bodyPossiblyIncomplete'],
       ),
       links: serializer.fromJson<String?>(json['links']),
-      bodyExpiresAt: serializer.fromJson<int?>(json['bodyExpiresAt']),
       bodyClearedAt: serializer.fromJson<int?>(json['bodyClearedAt']),
       analysisStatus: $MailsTable.$converteranalysisStatus.fromJson(
         serializer.fromJson<String>(json['analysisStatus']),
@@ -4733,7 +4701,6 @@ class MailRow extends DataClass implements Insertable<MailRow> {
       'bodyText': serializer.toJson<String?>(bodyText),
       'bodyPossiblyIncomplete': serializer.toJson<bool>(bodyPossiblyIncomplete),
       'links': serializer.toJson<String?>(links),
-      'bodyExpiresAt': serializer.toJson<int?>(bodyExpiresAt),
       'bodyClearedAt': serializer.toJson<int?>(bodyClearedAt),
       'analysisStatus': serializer.toJson<String>(
         $MailsTable.$converteranalysisStatus.toJson(analysisStatus),
@@ -4767,7 +4734,6 @@ class MailRow extends DataClass implements Insertable<MailRow> {
     Value<String?> bodyText = const Value.absent(),
     bool? bodyPossiblyIncomplete,
     Value<String?> links = const Value.absent(),
-    Value<int?> bodyExpiresAt = const Value.absent(),
     Value<int?> bodyClearedAt = const Value.absent(),
     MailAnalysisStatus? analysisStatus,
     Value<String?> analysisFailureType = const Value.absent(),
@@ -4801,9 +4767,6 @@ class MailRow extends DataClass implements Insertable<MailRow> {
     bodyPossiblyIncomplete:
         bodyPossiblyIncomplete ?? this.bodyPossiblyIncomplete,
     links: links.present ? links.value : this.links,
-    bodyExpiresAt: bodyExpiresAt.present
-        ? bodyExpiresAt.value
-        : this.bodyExpiresAt,
     bodyClearedAt: bodyClearedAt.present
         ? bodyClearedAt.value
         : this.bodyClearedAt,
@@ -4858,9 +4821,6 @@ class MailRow extends DataClass implements Insertable<MailRow> {
           ? data.bodyPossiblyIncomplete.value
           : this.bodyPossiblyIncomplete,
       links: data.links.present ? data.links.value : this.links,
-      bodyExpiresAt: data.bodyExpiresAt.present
-          ? data.bodyExpiresAt.value
-          : this.bodyExpiresAt,
       bodyClearedAt: data.bodyClearedAt.present
           ? data.bodyClearedAt.value
           : this.bodyClearedAt,
@@ -4914,7 +4874,6 @@ class MailRow extends DataClass implements Insertable<MailRow> {
           ..write('bodyText: $bodyText, ')
           ..write('bodyPossiblyIncomplete: $bodyPossiblyIncomplete, ')
           ..write('links: $links, ')
-          ..write('bodyExpiresAt: $bodyExpiresAt, ')
           ..write('bodyClearedAt: $bodyClearedAt, ')
           ..write('analysisStatus: $analysisStatus, ')
           ..write('analysisFailureType: $analysisFailureType, ')
@@ -4948,7 +4907,6 @@ class MailRow extends DataClass implements Insertable<MailRow> {
     bodyText,
     bodyPossiblyIncomplete,
     links,
-    bodyExpiresAt,
     bodyClearedAt,
     analysisStatus,
     analysisFailureType,
@@ -4981,7 +4939,6 @@ class MailRow extends DataClass implements Insertable<MailRow> {
           other.bodyText == this.bodyText &&
           other.bodyPossiblyIncomplete == this.bodyPossiblyIncomplete &&
           other.links == this.links &&
-          other.bodyExpiresAt == this.bodyExpiresAt &&
           other.bodyClearedAt == this.bodyClearedAt &&
           other.analysisStatus == this.analysisStatus &&
           other.analysisFailureType == this.analysisFailureType &&
@@ -5012,7 +4969,6 @@ class MailsCompanion extends UpdateCompanion<MailRow> {
   final Value<String?> bodyText;
   final Value<bool> bodyPossiblyIncomplete;
   final Value<String?> links;
-  final Value<int?> bodyExpiresAt;
   final Value<int?> bodyClearedAt;
   final Value<MailAnalysisStatus> analysisStatus;
   final Value<String?> analysisFailureType;
@@ -5042,7 +4998,6 @@ class MailsCompanion extends UpdateCompanion<MailRow> {
     this.bodyText = const Value.absent(),
     this.bodyPossiblyIncomplete = const Value.absent(),
     this.links = const Value.absent(),
-    this.bodyExpiresAt = const Value.absent(),
     this.bodyClearedAt = const Value.absent(),
     this.analysisStatus = const Value.absent(),
     this.analysisFailureType = const Value.absent(),
@@ -5073,7 +5028,6 @@ class MailsCompanion extends UpdateCompanion<MailRow> {
     this.bodyText = const Value.absent(),
     this.bodyPossiblyIncomplete = const Value.absent(),
     this.links = const Value.absent(),
-    this.bodyExpiresAt = const Value.absent(),
     this.bodyClearedAt = const Value.absent(),
     required MailAnalysisStatus analysisStatus,
     this.analysisFailureType = const Value.absent(),
@@ -5111,7 +5065,6 @@ class MailsCompanion extends UpdateCompanion<MailRow> {
     Expression<String>? bodyText,
     Expression<bool>? bodyPossiblyIncomplete,
     Expression<String>? links,
-    Expression<int>? bodyExpiresAt,
     Expression<int>? bodyClearedAt,
     Expression<String>? analysisStatus,
     Expression<String>? analysisFailureType,
@@ -5143,7 +5096,6 @@ class MailsCompanion extends UpdateCompanion<MailRow> {
       if (bodyPossiblyIncomplete != null)
         'body_possibly_incomplete': bodyPossiblyIncomplete,
       if (links != null) 'links': links,
-      if (bodyExpiresAt != null) 'body_expires_at': bodyExpiresAt,
       if (bodyClearedAt != null) 'body_cleared_at': bodyClearedAt,
       if (analysisStatus != null) 'analysis_status': analysisStatus,
       if (analysisFailureType != null)
@@ -5178,7 +5130,6 @@ class MailsCompanion extends UpdateCompanion<MailRow> {
     Value<String?>? bodyText,
     Value<bool>? bodyPossiblyIncomplete,
     Value<String?>? links,
-    Value<int?>? bodyExpiresAt,
     Value<int?>? bodyClearedAt,
     Value<MailAnalysisStatus>? analysisStatus,
     Value<String?>? analysisFailureType,
@@ -5210,7 +5161,6 @@ class MailsCompanion extends UpdateCompanion<MailRow> {
       bodyPossiblyIncomplete:
           bodyPossiblyIncomplete ?? this.bodyPossiblyIncomplete,
       links: links ?? this.links,
-      bodyExpiresAt: bodyExpiresAt ?? this.bodyExpiresAt,
       bodyClearedAt: bodyClearedAt ?? this.bodyClearedAt,
       analysisStatus: analysisStatus ?? this.analysisStatus,
       analysisFailureType: analysisFailureType ?? this.analysisFailureType,
@@ -5281,9 +5231,6 @@ class MailsCompanion extends UpdateCompanion<MailRow> {
     if (links.present) {
       map['links'] = Variable<String>(links.value);
     }
-    if (bodyExpiresAt.present) {
-      map['body_expires_at'] = Variable<int>(bodyExpiresAt.value);
-    }
     if (bodyClearedAt.present) {
       map['body_cleared_at'] = Variable<int>(bodyClearedAt.value);
     }
@@ -5346,7 +5293,6 @@ class MailsCompanion extends UpdateCompanion<MailRow> {
           ..write('bodyText: $bodyText, ')
           ..write('bodyPossiblyIncomplete: $bodyPossiblyIncomplete, ')
           ..write('links: $links, ')
-          ..write('bodyExpiresAt: $bodyExpiresAt, ')
           ..write('bodyClearedAt: $bodyClearedAt, ')
           ..write('analysisStatus: $analysisStatus, ')
           ..write('analysisFailureType: $analysisFailureType, ')
