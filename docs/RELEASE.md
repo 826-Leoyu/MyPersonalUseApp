@@ -7,6 +7,7 @@
 ```powershell
 flutter build windows --release
 Remove-Item build\windows\x64\runner\Release\native_assets.json -ErrorAction Ignore
+Copy-Item C:\Windows\System32\msvcp140.dll, C:\Windows\System32\vcruntime140.dll, C:\Windows\System32\vcruntime140_1.dll build\windows\x64\runner\Release\
 dart run tool/release_check/check_release.dart build\windows\x64\runner\Release
 Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath build\dailynote-windows-<版本号>.zip -Force
 ```
@@ -14,6 +15,8 @@ Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath build
 zip 里是整个 `Release` 目录的内容（exe、dll、`data\`），解压到任何地方都能直接运行 `Dailynote.exe`。
 
 `native_assets.json` 是打包工具留下的，里面写着仓库的绝对路径。App 运行时读的是 `data\flutter_assets\NativeAssetsManifest.json`（相对路径），所以删掉它不影响运行。
+
+`Dailynote.exe` 和插件的 dll 要用 VC++ 运行库（`msvcp140.dll`、`vcruntime140.dll`、`vcruntime140_1.dll`），Flutter 不会把它们放进包里。没装过 VC++ 运行库的电脑一打开就报"找不到 MSVCP140.dll"，所以把这三个 dll 和 exe 放在一起（微软允许这样随 App 分发）。
 
 ### 检查（M-41）
 
