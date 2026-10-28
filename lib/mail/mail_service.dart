@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:characters/characters.dart';
 import 'package:clock/clock.dart';
 import 'package:crypto/crypto.dart';
 import 'package:drift/drift.dart';
@@ -21,9 +20,12 @@ import 'export_parser.dart';
 import 'export_source.dart';
 import 'import_status.dart';
 import 'item_changes.dart';
+import 'item_rows.dart';
+import 'item_updates.dart';
 import 'mail_analyzer.dart';
 import 'mail_items.dart';
 import 'mail_preview.dart';
+import 'mail_setup.dart';
 import 'mail_states.dart';
 
 /// 导入一个导出文件的结果。
@@ -103,6 +105,8 @@ class MailService {
   static const _autoAnalysisDayKey = 'autoAnalysisDay';
   static const _autoAnalysisCountKey = 'autoAnalysisCount';
   static const _autoAnalysisResumedDayKey = 'autoAnalysisResumedDay';
+  static const _consentAtKey = 'mailConsentAt';
+  static const _setupCompletedKey = 'mailSetupCompleted';
 
   /// 云端流程每次导出多少封（流程里的 Top）。文件里正好这么多封时算满的。
   static const exportBatchSize = 200;
@@ -135,6 +139,11 @@ class MailService {
   final String Function() _generateId;
   final String Function() _timeZoneName;
   final ExportSource Function(String folder) _openFolder;
+  late final _updates = ItemUpdates(
+    planner: _planner,
+    clock: _clock,
+    generateId: _generateId,
+  );
 
   /// 手动选择一个导出文件导入。走和自动扫描一样的解析和入库规则，但不检查
   /// 文件名和文件是否稳定。
@@ -239,6 +248,62 @@ class MailService {
     if (await _meta(_firstSetupAtKey) case final at?) return int.parse(at);
     await _setMeta(_firstSetupAtKey, '$_nowMillis');
     return _nowMillis;
+  }
+
+  // ---- 首次设置向导 ----
+
+  /// 向导该从哪一步开始：第一个没做完的。同意和文件夹看有没有同意时间、
+  /// 有没有选文件夹（在设置页选的也算）；后两步看向导里有没有做完。
+  Future<SetupStep> setupStep() => _read(() async {
+    if (await _meta(_consentAtKey) == null) return SetupStep.consent;
+    if (await _meta(_mailFolderKey) == null) return SetupStep.folder;
+    return switch (await _meta(_setupCompletedKey)) {
+      final name? when name == SetupStep.trial.name => SetupStep.done,
+      final name? when name == SetupStep.claude.name => SetupStep.trial,
+      _ => SetupStep.claude,
+    };
+  });
+
+  /// 她同意的时间（UTC），还没同意时为 null。
+  Future<DateTime?> consentedAt() => _read(
+    () async => _fromMillis(int.tryParse(await _meta(_consentAtKey) ?? '')),
+  );
+
+  /// 向导第 1 步：她勾选了同意。记下第一次同意的时间，以后再同意不变。
+  Future<void> agreeToMailUse() => _write(() async {
+    if (await _meta(_consentAtKey) == null) {
+      await _setMeta(_consentAtKey, '$_nowMillis');
+    }
+  });
+
+  /// 向导第 3 步做完了：Claude Code 检查过了。
+  Future<void> completeClaudeCheck() => _write(() async {
+    if (await _meta(_setupCompletedKey) == null) {
+      await _setMeta(_setupCompletedKey, SetupStep.claude.name);
+    }
+  });
+
+  /// 向导第 4 步：用内置的虚构示例邮件（见 [sampleAnalysisRequest]）试分析
+  /// 一次。示例邮件不入库，不计入每天的上限。成功时向导做完，并且和别的
+  /// 邮件分析成功一样，等着装好、登录 Claude Code 或者等额度的邮件接着
+  /// 分析；失败时抛出 [AnalysisFailed]。首次设置时间不变。
+  Future<AnalysisResult> analyzeSample() async {
+    final analyzer = _analyzer;
+    if (analyzer == null) {
+      throw const AnalysisFailed(AnalysisFailureType.notInstalled);
+    }
+    final result = await analyzer.analyze(
+      sampleAnalysisRequest(now: _clock.now(), timeZone: _timeZoneName()),
+    );
+    await _write(() async {
+      await _setMeta(_setupCompletedKey, SetupStep.trial.name);
+      await _forgetFailures([
+        ..._userFixableFailures,
+        AnalysisFailureType.quotaExhausted.name,
+      ]);
+    });
+    unawaited(analyzePending());
+    return result;
   }
 
   /// 解析失败的文件稳定多久以后算格式错误；之前当作还在同步。
@@ -436,12 +501,8 @@ class MailService {
     for (final row in rows) {
       final item = row.readTable(items);
       final card = row.readTableOrNull(cards);
-      if (_isOpen(card)) mailsWithOpenCards.add(item.mailId);
-      (times[item.mailId] ??= []).add(
-        card != null
-            ? _cardTimes(card)
-            : (event: _itemEventTime(item), due: _itemDueTime(item)),
-      );
+      if (card?.isOpen ?? false) mailsWithOpenCards.add(item.mailId);
+      (times[item.mailId] ??= []).add(card?.times ?? item.times);
     }
     return (times: times, mailsWithOpenCards: mailsWithOpenCards);
   }
@@ -1086,7 +1147,7 @@ class MailService {
     receivedAt: _fromMillis(mail.receivedAt)?.toLocal(),
     importance: mail.importance,
     bodyText: mail.bodyText,
-    links: _decodeLinks(mail.links),
+    links: mail.linkList,
     hasAttachments: mail.hasAttachments,
     hasInlineImages: mail.hasInlineImages,
     bodyPossiblyIncomplete: mail.bodyPossiblyIncomplete,
@@ -1122,7 +1183,7 @@ class MailService {
       final card = row.readTableOrNull(cards);
       final open = switch (item.status) {
         MailItemStatus.candidate => true,
-        MailItemStatus.accepted => _isOpen(card),
+        MailItemStatus.accepted => card?.isOpen ?? false,
         MailItemStatus.ignored => false,
       };
       if (!open && item.conversationId != mail.conversationId) continue;
@@ -1130,8 +1191,8 @@ class MailService {
         RelatedItem(
           id: item.id,
           title: item.title,
-          eventTime: _itemEventTime(item),
-          dueTime: _itemDueTime(item),
+          eventTime: item.times.event,
+          dueTime: item.times.due,
           status: item.status,
         ),
       );
@@ -1233,8 +1294,8 @@ class MailService {
   }) async {
     switch (target.status) {
       case MailItemStatus.candidate:
-        final fields = _itemFields(item, _decodeLinks(mail.links));
-        final before = await _knownFields(target);
+        final fields = _itemFields(item, mail.linkList);
+        final before = await _updates.knownFields(target);
         if (ItemChanges.between(before, fields).isEmpty) return;
         await (_db.update(
           _db.mailItems,
@@ -1246,66 +1307,20 @@ class MailService {
             updatedAt: Value(now),
           ),
         );
-      case MailItemStatus.accepted when await _openCard(target.cardId) != null:
-        // 和卡片上采用过的不一样、也不是她不用过的，才算改动。
-        final after = _itemFields(item, _decodeLinks(mail.links));
-        final rejectedToo = ItemChanges.between(
-          await _knownFields(target),
-          after,
-        );
-        final applied = ItemChanges.between(
-          await _knownFields(target, withRejected: false),
-          after,
-        );
-        final changes = ItemChanges(
-          rejectedToo.fields.intersection(applied.fields),
-          after,
-        );
-        // 这封邮件比之前的建议新：之前的建议不管怎样都被替代。
-        final updates = _db.mailItemUpdates;
-        await (_db.update(updates)..where(
-              (u) =>
-                  u.itemId.equals(target.id) &
-                  u.status.equalsValue(MailItemUpdateStatus.pending),
-            ))
-            .write(
-              MailItemUpdatesCompanion(
-                status: const Value(MailItemUpdateStatus.superseded),
-                resolvedAt: Value(now),
-              ),
-            );
-        if (changes.isEmpty) return;
-        await _db
-            .into(updates)
-            .insert(
-              MailItemUpdatesCompanion.insert(
-                id: _generateId(),
-                itemId: target.id,
-                mailId: mail.id,
-                changes: changes.encode(),
-                status: MailItemUpdateStatus.pending,
-                createdAt: now,
-              ),
-            );
-      case MailItemStatus.accepted || MailItemStatus.ignored:
+      case MailItemStatus.accepted:
+        final after = _itemFields(item, mail.linkList);
+        if (!await _updates.propose(target, after, mailId: mail.id, now: now)) {
+          await _insertCandidate(
+            mail,
+            item,
+            now: now,
+            relatedItemId: target.id,
+          );
+        }
+      case MailItemStatus.ignored:
         await _insertCandidate(mail, item, now: now, relatedItemId: target.id);
     }
   }
-
-  /// 卡片 [cardId]，要在画布上、没完成、不在回收站；否则为 null。
-  Future<TaskCardRow?> _openCard(String? cardId) async {
-    if (cardId == null) return null;
-    final card = await (_db.select(
-      _db.taskCards,
-    )..where((c) => c.id.equals(cardId))).getSingleOrNull();
-    return _isOpen(card) ? card : null;
-  }
-
-  /// 卡片 [card] 在画布上、没完成、不在回收站。
-  static bool _isOpen(TaskCardRow? card) =>
-      card != null &&
-      card.status == CardStatus.active &&
-      card.deletedAt == null;
 
   Future<void> _insertCandidate(
     MailRow mail,
@@ -1361,35 +1376,6 @@ class MailService {
         eventTime: item.eventTime,
         dueTime: item.dueTime,
       );
-
-  /// 事项 [item] 现在已知的可更新字段：事项本身的，再按顺序叠上她采用过
-  /// 的更新建议；[withRejected] 时也叠上她不用的，同样的改动以后不再提。
-  /// 不叠不用的时候，就是卡片备注里来自邮件的那些内容。
-  Future<ItemFields> _knownFields(
-    MailItemRow item, {
-    bool withRejected = true,
-  }) async {
-    final mail = await (_db.select(
-      _db.mails,
-    )..where((m) => m.id.equals(item.mailId))).getSingle();
-    var fields = _rowFields(item, _decodeLinks(mail.links));
-    final resolved =
-        await (_db.select(_db.mailItemUpdates)
-              ..where(
-                (u) =>
-                    u.itemId.equals(item.id) &
-                    u.status.isInValues([
-                      MailItemUpdateStatus.applied,
-                      if (withRejected) MailItemUpdateStatus.rejected,
-                    ]),
-              )
-              ..orderBy([(u) => OrderingTerm.asc(u.createdAt)]))
-            .get();
-    for (final update in resolved) {
-      fields = fields.overlay(ItemChanges.decode(update.changes));
-    }
-    return fields;
-  }
 
   /// 点了 [这封有用]、又分析不出事项时，以邮件主题为标题的那个事项。
   AnalyzedItem _subjectItem(MailRow mail) => AnalyzedItem(
@@ -1449,11 +1435,11 @@ class MailService {
             id: item.id,
             title: item.title,
             summary: item.summary,
-            actions: _itemActions(item),
+            actions: item.actionList,
             location: item.location,
-            links: _itemLinks(item, _decodeLinks(mail.links)),
-            eventTime: _itemEventTime(item),
-            dueTime: _itemDueTime(item),
+            links: item.linksFrom(mail.linkList),
+            eventTime: item.times.event,
+            dueTime: item.times.due,
             optional: item.optional,
             updated: item.updated,
             relatedHint: relatedHint,
@@ -1578,7 +1564,7 @@ class MailService {
 
   /// 排序用的时间：截止时间，没有时用活动时间；只有日期时取那天 0 点。
   static DateTime? _sortTime(MailItemRow item) {
-    final time = _itemDueTime(item) ?? _itemEventTime(item);
+    final time = item.times.due ?? item.times.event;
     if (time?.time case final at?) return at;
     if (time?.day case final day?) {
       return DateTime(day.year, day.month, day.day);
@@ -1604,9 +1590,9 @@ class MailService {
       day,
       x: x,
       y: y,
-      title: _truncate(item.title, PlannerService.maxTitleLength),
-      note: _cardNote(item, _decodeLinks(mail.links)),
-      times: (event: _itemEventTime(item), due: _itemDueTime(item)),
+      title: truncateCharacters(item.title, PlannerService.maxTitleLength),
+      note: item.fields(mail.linkList).cardNote(PlannerService.maxNoteLength),
+      times: item.times,
     );
     await (_db.update(_db.mailItems)..where((i) => i.id.equals(itemId))).write(
       MailItemsCompanion(
@@ -1665,130 +1651,16 @@ class MailService {
 
   // ---- 更新建议 ----
 
-  /// 卡片上要显示的更新建议，按卡片 id。只有画布上没完成的卡片；同一张
-  /// 卡片只有最新的一条（旧的已经被替代）。
-  Stream<Map<String, CardUpdate>> watchCardUpdates() {
-    final updates = _db.mailItemUpdates;
-    final items = _db.mailItems;
-    final cards = _db.taskCards;
-    final query =
-        _db.select(updates).join([
-          innerJoin(items, items.id.equalsExp(updates.itemId)),
-          innerJoin(cards, cards.id.equalsExp(items.cardId)),
-        ])..where(
-          updates.status.equalsValue(MailItemUpdateStatus.pending) &
-              cards.status.equalsValue(CardStatus.active) &
-              cards.deletedAt.isNull(),
-        );
-    return query.watch().map((rows) {
-      return {
-        for (final row in rows)
-          row.readTable(cards).id: CardUpdate(
-            id: row.readTable(updates).id,
-            cardId: row.readTable(cards).id,
-            changes: ItemChanges.decode(row.readTable(updates).changes),
-            cardTimes: _cardTimes(row.readTable(cards)),
-          ),
-      };
-    });
-  }
+  /// 卡片上要显示的更新建议，按卡片 id。见 [ItemUpdates.watch]。
+  Stream<Map<String, CardUpdate>> watchCardUpdates() => _updates.watch();
 
-  /// [采用]：只把建议里列出的字段写到卡片上，她改过的其他内容不变；备注里
-  /// 只换掉对应的那一部分，找不到时把新内容加在最后。卡片和建议在同一个
-  /// 事务里修改。
-  ///
-  /// 建议已经处理过或被替代、卡片已经不在画布上时抛出 [InvalidState]。
-  Future<void> applyUpdate(String updateId) => _write(() async {
-    final update = await _requirePendingUpdate(updateId);
-    final item = await (_db.select(
-      _db.mailItems,
-    )..where((i) => i.id.equals(update.itemId))).getSingle();
-    final card = await _openCard(item.cardId);
-    if (card == null) throw const InvalidState('卡片已经不在画布上了');
-    final changes = ItemChanges.decode(update.changes);
-    final before = _noteParts(await _knownFields(item, withRejected: false));
-    final after = _noteParts(changes.values);
-    var note = card.note ?? '';
-    for (final field in after.keys) {
-      if (changes.fields.contains(field)) {
-        note = _replaceNotePart(note, before[field], after[field]);
-      }
-    }
-    final times = _cardTimes(card);
-    final changed = changes.fields;
-    await _planner.updateCardContentInTransaction(
-      card.id,
-      title: changed.contains(ItemField.title)
-          ? _truncate(changes.values.title, PlannerService.maxTitleLength)
-          : card.title,
-      note: note.trim().isEmpty
-          ? null
-          : _truncate(note, PlannerService.maxNoteLength),
-      times: (
-        event: changed.contains(ItemField.eventTime)
-            ? changes.values.eventTime
-            : times.event,
-        due: changed.contains(ItemField.dueTime)
-            ? changes.values.dueTime
-            : times.due,
-      ),
-    );
-    await _resolveUpdate(updateId, MailItemUpdateStatus.applied);
-  });
+  /// [采用]，卡片和建议在同一个事务里修改。见 [ItemUpdates.apply]。
+  Future<void> applyUpdate(String updateId) =>
+      _write(() => _updates.apply(updateId));
 
-  /// [不用]：建议不再显示，同样的改动以后也不再提。建议已经处理过或被
-  /// 替代时抛出 [InvalidState]。
-  Future<void> rejectUpdate(String updateId) => _write(() async {
-    await _requirePendingUpdate(updateId);
-    await _resolveUpdate(updateId, MailItemUpdateStatus.rejected);
-  });
-
-  Future<MailItemUpdateRow> _requirePendingUpdate(String updateId) async {
-    final update = await (_db.select(
-      _db.mailItemUpdates,
-    )..where((u) => u.id.equals(updateId))).getSingleOrNull();
-    if (update == null) throw NotFound('找不到更新建议 $updateId');
-    if (update.status != MailItemUpdateStatus.pending) {
-      throw const InvalidState('这条更新已经处理过了');
-    }
-    return update;
-  }
-
-  Future<void> _resolveUpdate(String updateId, MailItemUpdateStatus status) =>
-      (_db.update(
-        _db.mailItemUpdates,
-      )..where((u) => u.id.equals(updateId))).write(
-        MailItemUpdatesCompanion(
-          status: Value(status),
-          resolvedAt: Value(_nowMillis),
-        ),
-      );
-
-  /// 在备注 [note] 里把 [before] 换成 [after]：[after] 为 null 时删掉
-  /// [before] 那一段；备注里没有 [before] 时把 [after] 加在最后。
-  static String _replaceNotePart(String note, String? before, String? after) {
-    if (before != null && note.contains(before)) {
-      if (after != null) return note.replaceFirst(before, after);
-      for (final part in ['$before\n', '\n$before', before]) {
-        if (note.contains(part)) return note.replaceFirst(part, '');
-      }
-    }
-    if (after == null) return note;
-    return note.isEmpty ? after : '$note\n$after';
-  }
-
-  static CardTimes _cardTimes(TaskCardRow card) => (
-    event: cardTimeFromColumns(
-      card.eventTime,
-      card.eventTimePrecision,
-      card.eventTimePending,
-    ),
-    due: cardTimeFromColumns(
-      card.dueTime,
-      card.dueTimePrecision,
-      card.dueTimePending,
-    ),
-  );
+  /// [不用]。见 [ItemUpdates.reject]。
+  Future<void> rejectUpdate(String updateId) =>
+      _write(() => _updates.reject(updateId));
 
   Future<MailItemRow> _requireCandidate(String itemId) =>
       _requireItem(itemId, MailItemStatus.candidate, '这个事项已经处理过了');
@@ -1807,76 +1679,6 @@ class MailService {
     if (item.status != status) throw InvalidState(wrongStatus);
     return item;
   }
-
-  /// 卡片的备注：依次是摘要、要做的事、地点、第一个链接；都没有时为 null。
-  static String? _cardNote(MailItemRow item, List<String> links) {
-    final parts = [..._noteParts(_rowFields(item, links)).values.nonNulls];
-    if (parts.isEmpty) return null;
-    return _truncate(parts.join('\n'), PlannerService.maxNoteLength);
-  }
-
-  /// 卡片备注里来自事项各个字段的那一段，按备注里的顺序；没有时为 null。
-  /// [采用] 时按它找到备注里要换掉的部分。
-  static Map<ItemField, String?> _noteParts(ItemFields fields) => {
-    ItemField.summary: fields.summary,
-    ItemField.actions: fields.actions.isEmpty
-        ? null
-        : [for (final action in fields.actions) '- $action'].join('\n'),
-    ItemField.location: switch (fields.location) {
-      final location? => '地点：$location',
-      null => null,
-    },
-    ItemField.links: fields.links.firstOrNull,
-  };
-
-  /// 事项 [item] 本身的可更新字段；[links] 是它的来源邮件的链接列表。
-  static ItemFields _rowFields(MailItemRow item, List<String> links) =>
-      ItemFields(
-        title: item.title,
-        summary: item.summary,
-        actions: _itemActions(item),
-        location: item.location,
-        links: _itemLinks(item, links),
-        eventTime: _itemEventTime(item),
-        dueTime: _itemDueTime(item),
-      );
-
-  /// 事项要做的事。
-  static List<String> _itemActions(MailItemRow item) => switch (item.actions) {
-    final json? => (jsonDecode(json) as List<Object?>).cast<String>(),
-    null => const [],
-  };
-
-  /// 事项引用的链接，按引用的顺序；[links] 是邮件的链接列表。
-  static List<String> _itemLinks(MailItemRow item, List<String> links) {
-    final refs = switch (item.linkRefs) {
-      final json? => (jsonDecode(json) as List<Object?>).cast<int>(),
-      null => const <int>[],
-    };
-    return [
-      for (final ref in refs)
-        if (ref >= 1 && ref <= links.length) links[ref - 1],
-    ];
-  }
-
-  static String _truncate(String text, int maxCharacters) {
-    final characters = text.characters;
-    return characters.length <= maxCharacters
-        ? text
-        : characters.take(maxCharacters).toString();
-  }
-
-  static CardTime? _itemEventTime(MailItemRow item) => cardTimeFromColumns(
-    item.eventTime,
-    item.eventTimePrecision,
-    item.eventTimePending,
-  );
-
-  static CardTime? _itemDueTime(MailItemRow item) => cardTimeFromColumns(
-    item.dueTime,
-    item.dueTimePrecision,
-    item.dueTimePending,
-  );
 
   static DateTime? _fromMillis(int? millis) => millis == null
       ? null
@@ -1908,7 +1710,7 @@ class MailService {
       preview: _preview(row),
       body: MailBody(
         text: row.bodyText,
-        links: _decodeLinks(row.links),
+        links: row.linkList,
         hasInlineImages: row.hasInlineImages,
         possiblyIncomplete: row.bodyPossiblyIncomplete,
       ),
@@ -1984,8 +1786,3 @@ class MailService {
 /// 邮件的链接列存成 URL 的 JSON 数组；没有链接时为 null。
 String? _encodeLinks(List<String> links) =>
     links.isEmpty ? null : jsonEncode(links);
-
-List<String> _decodeLinks(String? json) => switch (json) {
-  final json? => (jsonDecode(json) as List<Object?>).cast<String>(),
-  null => const [],
-};

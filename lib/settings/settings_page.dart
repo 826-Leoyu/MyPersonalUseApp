@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/providers.dart';
-import '../formatting/date_format.dart';
 import '../mail/import_status.dart';
+import '../mail/setup_wizard_page.dart';
 import '../planner/planner_exceptions.dart';
 
 /// 设置页。现在只有「邮件」一节（只在 Windows 上有）。
@@ -12,6 +12,9 @@ class SettingsPage extends ConsumerWidget {
 
   /// 「邮件文件夹」一项的 key。
   static const mailFolderTileKey = ValueKey('settings-mail-folder');
+
+  /// 「设置向导」一项的 key。
+  static const setupWizardTileKey = ValueKey('settings-setup-wizard');
 
   /// 「邮箱地址」一项的 key。
   static const mailboxTileKey = ValueKey('settings-mailbox');
@@ -37,6 +40,12 @@ class SettingsPage extends ConsumerWidget {
                 '邮件',
                 style: TextStyle(color: Theme.of(context).colorScheme.primary),
               ),
+            ),
+            ListTile(
+              key: setupWizardTileKey,
+              title: const Text('设置向导'),
+              subtitle: const Text('一步一步检查邮件功能需要的设置'),
+              onTap: () => SetupWizardPage.open(Navigator.of(context)),
             ),
             const _MailFolderTile(),
             ListTile(
@@ -111,10 +120,7 @@ class _MailFolderTileState extends ConsumerState<_MailFolderTile> {
   Widget build(BuildContext context) {
     final folder = ref.watch(mailFolderProvider);
     final check = switch (_check) {
-      FolderFound(:final fileCount, latestFileAt: final at?) =>
-        '找到 $fileCount 个导出文件，最新一个是 ${formatReceivedTime(at)}',
-      FolderFound(:final fileCount) => '找到 $fileCount 个导出文件',
-      FolderUnavailable() => '这个文件夹打不开，请换一个',
+      final check? => folderCheckText(check),
       null => null,
     };
     return ListTile(
