@@ -101,6 +101,8 @@ DailyNote 的判断顺序：
 
 文档里其他登录类的提示（`Invalid API key`、`OAuth token has expired`、`Authentication required · Sign in again to continue`）也归到"未登录"。
 
+**检查是否登录（#91，向导第 3 步）**：`claude auth status --json`（`--json` 是默认）。2026-10-28 用 `2.1.308` 实测：已登录时 `exit=0`，输出里 `"loggedIn": true`；空的 `HOME` 时 `exit=1`，`"loggedIn": false`，`"authMethod": "none"`。已登录时输出里还有邮箱和组织信息，DailyNote 只看 `loggedIn`，不保存也不记录别的字段。这个命令不调用模型、不用额度。认不出输出（老版本没有 `auth` 子命令等）或者超时时，向导显示"看不出是否已经登录"，允许继续，由第 4 步的试分析确认。
+
 **实测到的一次卡住**：对照实验里有一次 `--tools ""` 的调用超过 5 分钟都没有结束，重跑一次 10 秒内就正常完成了，原因没有找到。必须有超时；spec 暂定的 120 秒够用（正常一次 10 秒左右）。
 
 ## 一次调用的耗时

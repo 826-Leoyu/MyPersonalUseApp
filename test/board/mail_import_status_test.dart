@@ -9,6 +9,7 @@ import 'package:my_personal_use_app/mail/mail_analyzer.dart';
 import 'package:my_personal_use_app/mail/mail_import_status_line.dart';
 import 'package:my_personal_use_app/mail/mail_scan_schedule.dart';
 import 'package:my_personal_use_app/mail/mail_service.dart';
+import 'package:my_personal_use_app/mail/setup_wizard_page.dart';
 import 'package:my_personal_use_app/settings/settings_page.dart';
 
 import '../mail/mail_fixtures.dart';
@@ -74,14 +75,14 @@ void main() {
     matching: find.text(text),
   );
 
-  windowsTest('没选择文件夹时状态行显示"开始设置"，点它打开设置页', (tester) async {
+  windowsTest('没选择文件夹时状态行显示"开始设置"，点它打开设置向导', (tester) async {
     await harness.launch(tester);
 
     expect(headline('开始设置'), findsOneWidget);
     await tester.tap(headline('开始设置'));
     await harness.settle(tester);
 
-    expect(find.byType(SettingsPage), findsOneWidget);
+    expect(find.byType(SetupWizardPage), findsOneWidget);
     await harness.dispose(tester);
   });
 

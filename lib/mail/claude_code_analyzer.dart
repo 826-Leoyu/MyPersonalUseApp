@@ -59,6 +59,7 @@ class ClaudeCodeAnalyzer implements MailAnalyzer {
     String? Function(Map<String, String> environment)? findExecutable,
     ProcessTreeKiller? killProcessTree,
     this.timeout = const Duration(seconds: 120),
+    this.statusTimeout = const Duration(seconds: 15),
   }) : _start = startProcess ?? _startProcess,
        _killTree = killProcessTree ?? _killProcessTree,
        _environment = environment ?? Platform.environment,
@@ -71,6 +72,9 @@ class ClaudeCodeAnalyzer implements MailAnalyzer {
   final Map<String, String> _environment;
   final String? Function(Map<String, String>) _find;
   final Duration timeout;
+
+  /// 检查登录状态的超时：`auth status` 不调用模型，正常一两秒就结束。
+  final Duration statusTimeout;
 
   @override
   Future<AnalysisResult> analyze(AnalysisRequest request) async {
@@ -95,6 +99,7 @@ class ClaudeCodeAnalyzer implements MailAnalyzer {
         claudeArguments(promptFile.path),
         workingDirectory: workingDirectory.path,
         stdin: jsonEncode(request.toJson()),
+        timeout: timeout,
       );
       return parseAnalysisResult(_structuredOutput(output), request);
     } finally {
@@ -106,11 +111,45 @@ class ClaudeCodeAnalyzer implements MailAnalyzer {
     }
   }
 
+  /// 检查 Claude Code 装了没有、登录了没有（向导第 3 步）。用
+  /// `claude auth status --json`，只看输出里的 `loggedIn`，不读也不保存
+  /// 别的内容。
+  Future<ClaudeCodeStatus> checkStatus() async {
+    final executable = _find(_environment);
+    if (executable == null) return const ClaudeCodeMissing();
+    final ({int exitCode, String stdout}) output;
+    try {
+      output = await _run(
+        executable,
+        const ['auth', 'status', '--json'],
+        workingDirectory: Directory.systemTemp.path,
+        stdin: '',
+        timeout: statusTimeout,
+      );
+    } on AnalysisFailed catch (e) {
+      return e.type == AnalysisFailureType.notInstalled
+          ? const ClaudeCodeMissing()
+          : ClaudeCodeLoginUnknown(executable);
+    }
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(output.stdout);
+    } on FormatException {
+      return ClaudeCodeLoginUnknown(executable);
+    }
+    return switch (decoded) {
+      {'loggedIn': true} => ClaudeCodeReady(executable),
+      {'loggedIn': false} => ClaudeCodeNotLoggedIn(executable),
+      _ => ClaudeCodeLoginUnknown(executable),
+    };
+  }
+
   Future<({int exitCode, String stdout})> _run(
     String executable,
     List<String> arguments, {
     required String workingDirectory,
     required String stdin,
+    required Duration timeout,
   }) async {
     final Process process;
     try {
@@ -199,6 +238,38 @@ class ClaudeCodeAnalyzer implements MailAnalyzer {
     'OAuth token has expired',
     'Authentication required',
   ];
+}
+
+/// Claude Code 装了没有、登录了没有。
+sealed class ClaudeCodeStatus {
+  const ClaudeCodeStatus();
+}
+
+/// 找不到 Claude Code。
+class ClaudeCodeMissing extends ClaudeCodeStatus {
+  const ClaudeCodeMissing();
+}
+
+/// 找到了 Claude Code，位置是 [path]。
+sealed class ClaudeCodeFound extends ClaudeCodeStatus {
+  const ClaudeCodeFound(this.path);
+
+  final String path;
+}
+
+/// 装好了，也登录了。
+class ClaudeCodeReady extends ClaudeCodeFound {
+  const ClaudeCodeReady(super.path);
+}
+
+/// 装好了，没有登录或者登录过期。
+class ClaudeCodeNotLoggedIn extends ClaudeCodeFound {
+  const ClaudeCodeNotLoggedIn(super.path);
+}
+
+/// 装好了，但看不出登录了没有（超时，或者这个版本的输出认不出来）。
+class ClaudeCodeLoginUnknown extends ClaudeCodeFound {
+  const ClaudeCodeLoginUnknown(super.path);
 }
 
 /// 调用 `claude` 的参数。不用 `--bare`（读不到订阅登录），也不用

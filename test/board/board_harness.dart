@@ -10,6 +10,7 @@ import 'package:my_personal_use_app/app/planner_app.dart';
 import 'package:my_personal_use_app/app/providers.dart';
 import 'package:my_personal_use_app/board/board_canvas.dart';
 import 'package:my_personal_use_app/board/board_selection.dart';
+import 'package:my_personal_use_app/mail/claude_code_analyzer.dart';
 import 'package:my_personal_use_app/mail/mail_service.dart';
 import 'package:my_personal_use_app/planner/day_board.dart';
 import 'package:my_personal_use_app/planner/day_key.dart';
@@ -58,6 +59,11 @@ class BoardHarness {
 
   /// App 用的分析器：按脚本返回结果，不调用真的 Claude Code。
   final analyzer = FakeAnalyzer();
+
+  /// 向导第 3 步检查 Claude Code 时得到的结果。
+  ClaudeCodeStatus claudeStatus = const ClaudeCodeReady(
+    r'C:\Users\her\.local\bin\claude.exe',
+  );
 
   /// 打开后，App 的所有写入都会报错；读取不受影响。
   set failWrites(bool value) =>
@@ -275,6 +281,7 @@ class BoardHarness {
       pickMailFolderProvider.overrideWithValue(() async => pickedMailFolder),
       mailExportSourceProvider.overrideWithValue(folders.open),
       mailAnalyzerProvider.overrideWithValue(analyzer),
+      claudeCodeStatusProvider.overrideWithValue(() async => claudeStatus),
       if (displayedDay case final day?)
         displayedDayProvider.overrideWithBuild((ref, _) => day),
     ],

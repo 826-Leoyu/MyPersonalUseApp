@@ -5,6 +5,8 @@ import '../app/providers.dart';
 import '../formatting/date_format.dart';
 import '../mail/mail_items_panel.dart';
 import '../mail/mail_preview_page.dart';
+import '../mail/mail_setup.dart';
+import '../mail/setup_wizard_page.dart';
 import '../planner/day_key.dart';
 import '../planner/planner_exceptions.dart';
 import '../planner/task_card.dart';
@@ -93,7 +95,7 @@ class _BoardPageState extends ConsumerState<BoardPage> {
       height: MediaQuery.sizeOf(context).height * 0.6,
       child: MailItemsPanel(
         newCardPosition: _newCardPosition,
-        onOpenSettings: () => _leaveBoardTo(SettingsPage.open),
+        onOpenSetup: _openSetup,
       ),
     ),
   );
@@ -226,7 +228,7 @@ class _BoardPageState extends ConsumerState<BoardPage> {
           ? MailItemsSidePanel(
               child: MailItemsPanel(
                 newCardPosition: _newCardPosition,
-                onOpenSettings: () => _leaveBoardTo(SettingsPage.open),
+                onOpenSetup: _openSetup,
                 onCollapse: () => setState(() => _mailPanelOpen = false),
               ),
             )
@@ -268,6 +270,11 @@ class _BoardPageState extends ConsumerState<BoardPage> {
     if (day == ref.read(displayedDayProvider)) return;
     switchDay(context, ref, (s) => s.showDay(day));
   }
+
+  /// 打开首次设置向导，见 [MailImportStatusLine.onOpenSetup]。
+  void _openSetup([SetupStep? step]) => _leaveBoardTo(
+    (navigator) => SetupWizardPage.open(navigator, startAt: step),
+  );
 
   /// 从画布打开别的页面（已完成列表、回收站、邮件、设置）：先保存正在编辑的内容，保存
   /// 失败时提示，不打开。
