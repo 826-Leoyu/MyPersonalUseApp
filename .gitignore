@@ -73,3 +73,6 @@ app.*.map.json
 Thumbs.db
 desktop.ini
 *.log
+
+# M-41 本地清单：测试邮箱、OneDrive 账号
+tool/release_check/local_traces.txt
