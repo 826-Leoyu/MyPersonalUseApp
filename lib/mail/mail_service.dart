@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:characters/characters.dart';
 import 'package:clock/clock.dart';
 import 'package:crypto/crypto.dart';
 import 'package:drift/drift.dart';
@@ -21,6 +20,7 @@ import 'export_parser.dart';
 import 'export_source.dart';
 import 'import_status.dart';
 import 'item_changes.dart';
+import 'item_rows.dart';
 import 'mail_analyzer.dart';
 import 'mail_items.dart';
 import 'mail_preview.dart';
@@ -436,12 +436,8 @@ class MailService {
     for (final row in rows) {
       final item = row.readTable(items);
       final card = row.readTableOrNull(cards);
-      if (_isOpen(card)) mailsWithOpenCards.add(item.mailId);
-      (times[item.mailId] ??= []).add(
-        card != null
-            ? _cardTimes(card)
-            : (event: _itemEventTime(item), due: _itemDueTime(item)),
-      );
+      if (card?.isOpen ?? false) mailsWithOpenCards.add(item.mailId);
+      (times[item.mailId] ??= []).add(card?.times ?? item.times);
     }
     return (times: times, mailsWithOpenCards: mailsWithOpenCards);
   }
@@ -1086,7 +1082,7 @@ class MailService {
     receivedAt: _fromMillis(mail.receivedAt)?.toLocal(),
     importance: mail.importance,
     bodyText: mail.bodyText,
-    links: _decodeLinks(mail.links),
+    links: mail.linkList,
     hasAttachments: mail.hasAttachments,
     hasInlineImages: mail.hasInlineImages,
     bodyPossiblyIncomplete: mail.bodyPossiblyIncomplete,
@@ -1122,7 +1118,7 @@ class MailService {
       final card = row.readTableOrNull(cards);
       final open = switch (item.status) {
         MailItemStatus.candidate => true,
-        MailItemStatus.accepted => _isOpen(card),
+        MailItemStatus.accepted => card?.isOpen ?? false,
         MailItemStatus.ignored => false,
       };
       if (!open && item.conversationId != mail.conversationId) continue;
@@ -1130,8 +1126,8 @@ class MailService {
         RelatedItem(
           id: item.id,
           title: item.title,
-          eventTime: _itemEventTime(item),
-          dueTime: _itemDueTime(item),
+          eventTime: item.times.event,
+          dueTime: item.times.due,
           status: item.status,
         ),
       );
@@ -1233,7 +1229,7 @@ class MailService {
   }) async {
     switch (target.status) {
       case MailItemStatus.candidate:
-        final fields = _itemFields(item, _decodeLinks(mail.links));
+        final fields = _itemFields(item, mail.linkList);
         final before = await _knownFields(target);
         if (ItemChanges.between(before, fields).isEmpty) return;
         await (_db.update(
@@ -1248,7 +1244,7 @@ class MailService {
         );
       case MailItemStatus.accepted when await _openCard(target.cardId) != null:
         // 和卡片上采用过的不一样、也不是她不用过的，才算改动。
-        final after = _itemFields(item, _decodeLinks(mail.links));
+        final after = _itemFields(item, mail.linkList);
         final rejectedToo = ItemChanges.between(
           await _knownFields(target),
           after,
@@ -1298,14 +1294,8 @@ class MailService {
     final card = await (_db.select(
       _db.taskCards,
     )..where((c) => c.id.equals(cardId))).getSingleOrNull();
-    return _isOpen(card) ? card : null;
+    return card?.isOpen ?? false ? card : null;
   }
-
-  /// 卡片 [card] 在画布上、没完成、不在回收站。
-  static bool _isOpen(TaskCardRow? card) =>
-      card != null &&
-      card.status == CardStatus.active &&
-      card.deletedAt == null;
 
   Future<void> _insertCandidate(
     MailRow mail,
@@ -1372,7 +1362,7 @@ class MailService {
     final mail = await (_db.select(
       _db.mails,
     )..where((m) => m.id.equals(item.mailId))).getSingle();
-    var fields = _rowFields(item, _decodeLinks(mail.links));
+    var fields = item.fields(mail.linkList);
     final resolved =
         await (_db.select(_db.mailItemUpdates)
               ..where(
@@ -1449,11 +1439,11 @@ class MailService {
             id: item.id,
             title: item.title,
             summary: item.summary,
-            actions: _itemActions(item),
+            actions: item.actionList,
             location: item.location,
-            links: _itemLinks(item, _decodeLinks(mail.links)),
-            eventTime: _itemEventTime(item),
-            dueTime: _itemDueTime(item),
+            links: item.linksFrom(mail.linkList),
+            eventTime: item.times.event,
+            dueTime: item.times.due,
             optional: item.optional,
             updated: item.updated,
             relatedHint: relatedHint,
@@ -1578,7 +1568,7 @@ class MailService {
 
   /// 排序用的时间：截止时间，没有时用活动时间；只有日期时取那天 0 点。
   static DateTime? _sortTime(MailItemRow item) {
-    final time = _itemDueTime(item) ?? _itemEventTime(item);
+    final time = item.times.due ?? item.times.event;
     if (time?.time case final at?) return at;
     if (time?.day case final day?) {
       return DateTime(day.year, day.month, day.day);
@@ -1604,9 +1594,9 @@ class MailService {
       day,
       x: x,
       y: y,
-      title: _truncate(item.title, PlannerService.maxTitleLength),
-      note: _cardNote(item, _decodeLinks(mail.links)),
-      times: (event: _itemEventTime(item), due: _itemDueTime(item)),
+      title: truncateCharacters(item.title, PlannerService.maxTitleLength),
+      note: item.fields(mail.linkList).cardNote(PlannerService.maxNoteLength),
+      times: item.times,
     );
     await (_db.update(_db.mailItems)..where((i) => i.id.equals(itemId))).write(
       MailItemsCompanion(
@@ -1687,7 +1677,7 @@ class MailService {
             id: row.readTable(updates).id,
             cardId: row.readTable(cards).id,
             changes: ItemChanges.decode(row.readTable(updates).changes),
-            cardTimes: _cardTimes(row.readTable(cards)),
+            cardTimes: row.readTable(cards).times,
           ),
       };
     });
@@ -1706,24 +1696,27 @@ class MailService {
     final card = await _openCard(item.cardId);
     if (card == null) throw const InvalidState('卡片已经不在画布上了');
     final changes = ItemChanges.decode(update.changes);
-    final before = _noteParts(await _knownFields(item, withRejected: false));
-    final after = _noteParts(changes.values);
+    final before = (await _knownFields(item, withRejected: false)).noteParts;
+    final after = changes.values.noteParts;
     var note = card.note ?? '';
     for (final field in after.keys) {
       if (changes.fields.contains(field)) {
         note = _replaceNotePart(note, before[field], after[field]);
       }
     }
-    final times = _cardTimes(card);
+    final times = card.times;
     final changed = changes.fields;
     await _planner.updateCardContentInTransaction(
       card.id,
       title: changed.contains(ItemField.title)
-          ? _truncate(changes.values.title, PlannerService.maxTitleLength)
+          ? truncateCharacters(
+              changes.values.title,
+              PlannerService.maxTitleLength,
+            )
           : card.title,
       note: note.trim().isEmpty
           ? null
-          : _truncate(note, PlannerService.maxNoteLength),
+          : truncateCharacters(note, PlannerService.maxNoteLength),
       times: (
         event: changed.contains(ItemField.eventTime)
             ? changes.values.eventTime
@@ -1777,19 +1770,6 @@ class MailService {
     return note.isEmpty ? after : '$note\n$after';
   }
 
-  static CardTimes _cardTimes(TaskCardRow card) => (
-    event: cardTimeFromColumns(
-      card.eventTime,
-      card.eventTimePrecision,
-      card.eventTimePending,
-    ),
-    due: cardTimeFromColumns(
-      card.dueTime,
-      card.dueTimePrecision,
-      card.dueTimePending,
-    ),
-  );
-
   Future<MailItemRow> _requireCandidate(String itemId) =>
       _requireItem(itemId, MailItemStatus.candidate, '这个事项已经处理过了');
 
@@ -1807,76 +1787,6 @@ class MailService {
     if (item.status != status) throw InvalidState(wrongStatus);
     return item;
   }
-
-  /// 卡片的备注：依次是摘要、要做的事、地点、第一个链接；都没有时为 null。
-  static String? _cardNote(MailItemRow item, List<String> links) {
-    final parts = [..._noteParts(_rowFields(item, links)).values.nonNulls];
-    if (parts.isEmpty) return null;
-    return _truncate(parts.join('\n'), PlannerService.maxNoteLength);
-  }
-
-  /// 卡片备注里来自事项各个字段的那一段，按备注里的顺序；没有时为 null。
-  /// [采用] 时按它找到备注里要换掉的部分。
-  static Map<ItemField, String?> _noteParts(ItemFields fields) => {
-    ItemField.summary: fields.summary,
-    ItemField.actions: fields.actions.isEmpty
-        ? null
-        : [for (final action in fields.actions) '- $action'].join('\n'),
-    ItemField.location: switch (fields.location) {
-      final location? => '地点：$location',
-      null => null,
-    },
-    ItemField.links: fields.links.firstOrNull,
-  };
-
-  /// 事项 [item] 本身的可更新字段；[links] 是它的来源邮件的链接列表。
-  static ItemFields _rowFields(MailItemRow item, List<String> links) =>
-      ItemFields(
-        title: item.title,
-        summary: item.summary,
-        actions: _itemActions(item),
-        location: item.location,
-        links: _itemLinks(item, links),
-        eventTime: _itemEventTime(item),
-        dueTime: _itemDueTime(item),
-      );
-
-  /// 事项要做的事。
-  static List<String> _itemActions(MailItemRow item) => switch (item.actions) {
-    final json? => (jsonDecode(json) as List<Object?>).cast<String>(),
-    null => const [],
-  };
-
-  /// 事项引用的链接，按引用的顺序；[links] 是邮件的链接列表。
-  static List<String> _itemLinks(MailItemRow item, List<String> links) {
-    final refs = switch (item.linkRefs) {
-      final json? => (jsonDecode(json) as List<Object?>).cast<int>(),
-      null => const <int>[],
-    };
-    return [
-      for (final ref in refs)
-        if (ref >= 1 && ref <= links.length) links[ref - 1],
-    ];
-  }
-
-  static String _truncate(String text, int maxCharacters) {
-    final characters = text.characters;
-    return characters.length <= maxCharacters
-        ? text
-        : characters.take(maxCharacters).toString();
-  }
-
-  static CardTime? _itemEventTime(MailItemRow item) => cardTimeFromColumns(
-    item.eventTime,
-    item.eventTimePrecision,
-    item.eventTimePending,
-  );
-
-  static CardTime? _itemDueTime(MailItemRow item) => cardTimeFromColumns(
-    item.dueTime,
-    item.dueTimePrecision,
-    item.dueTimePending,
-  );
 
   static DateTime? _fromMillis(int? millis) => millis == null
       ? null
@@ -1908,7 +1818,7 @@ class MailService {
       preview: _preview(row),
       body: MailBody(
         text: row.bodyText,
-        links: _decodeLinks(row.links),
+        links: row.linkList,
         hasInlineImages: row.hasInlineImages,
         possiblyIncomplete: row.bodyPossiblyIncomplete,
       ),
@@ -1984,8 +1894,3 @@ class MailService {
 /// 邮件的链接列存成 URL 的 JSON 数组；没有链接时为 null。
 String? _encodeLinks(List<String> links) =>
     links.isEmpty ? null : jsonEncode(links);
-
-List<String> _decodeLinks(String? json) => switch (json) {
-  final json? => (jsonDecode(json) as List<Object?>).cast<String>(),
-  null => const [],
-};
