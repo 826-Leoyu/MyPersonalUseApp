@@ -8,12 +8,13 @@ import '../planner/day_key.dart';
 import '../planner/planner_exceptions.dart';
 import 'import_status.dart';
 import 'mail_service.dart';
+import 'mail_setup.dart';
 
 /// "新邮件事项"栏顶部的状态行（spec 0002"界面·状态行"）：最靠前的一条
 /// 提示，有好几条时点开看全部；[立即导入]；找不到文件夹时 [重新选择]；
 /// 下面常驻一行"不代表云端流程正常"的说明。
 class MailImportStatusLine extends ConsumerStatefulWidget {
-  const MailImportStatusLine({super.key, required this.onOpenSettings});
+  const MailImportStatusLine({super.key, required this.onOpenSetup});
 
   /// 状态行最上面那一条的 key。
   static const headlineKey = ValueKey('mail-import-headline');
@@ -21,9 +22,11 @@ class MailImportStatusLine extends ConsumerStatefulWidget {
   static const chooseAgainKey = ValueKey('mail-import-choose-again');
   static const resumeAnalysisKey = ValueKey('mail-analysis-resume');
   static const retryAnalysisKey = ValueKey('mail-analysis-retry');
+  static const checkClaudeKey = ValueKey('mail-analysis-check-claude');
 
-  /// 打开设置页（没选择文件夹时的"开始设置"）。
-  final VoidCallback onOpenSettings;
+  /// 打开首次设置向导：没选择文件夹时的"开始设置"从没做完的那一步开始
+  /// （[step] 为 null），找不到 Claude Code 或没登录时打开第 3 步。
+  final void Function([SetupStep? step]) onOpenSetup;
 
   @override
   ConsumerState<MailImportStatusLine> createState() =>
@@ -46,7 +49,7 @@ class _MailImportStatusLineState extends ConsumerState<MailImportStatusLine> {
         if (notices.contains(const FolderNotSet())) {
           content = _headline(
             '开始设置',
-            onTap: widget.onOpenSettings,
+            onTap: widget.onOpenSetup,
             style: TextStyle(color: theme.colorScheme.primary),
           );
           break;
@@ -76,7 +79,7 @@ class _MailImportStatusLineState extends ConsumerState<MailImportStatusLine> {
                         : null,
                   ),
                 ),
-                if (notices.isNotEmpty) ?_action(notices, 0),
+                if (notices.isNotEmpty) ..._actions(notices, 0),
                 if (notices.contains(const FolderMissing()))
                   TextButton(
                     key: MailImportStatusLine.chooseAgainKey,
@@ -100,7 +103,7 @@ class _MailImportStatusLineState extends ConsumerState<MailImportStatusLine> {
                       Expanded(
                         child: Text(line, style: theme.textTheme.bodySmall),
                       ),
-                      if (i < notices.length) ?_action(notices, i),
+                      if (i < notices.length) ..._actions(notices, i),
                     ],
                   ),
                 ),
@@ -160,25 +163,29 @@ class _MailImportStatusLineState extends ConsumerState<MailImportStatusLine> {
     AnalysisFailures(:final count) => '⚠ $count 封邮件分析失败',
   };
 
-  /// 第 [index] 条提示旁边的按钮；没有要她做的事时为 null。一个 [重试]
-  /// 会重试所有失败的邮件，所以只放在第一条能重试的提示旁边。
-  Widget? _action(List<ImportNotice> notices, int index) =>
-      switch (notices[index]) {
-        AnalysisPaused() => TextButton(
-          key: MailImportStatusLine.resumeAnalysisKey,
-          onPressed: () => _withService((s) => s.resumeAnalysis()),
-          child: const Text('继续分析'),
-        ),
-        final notice
-            when _retryable(notice) &&
-                notices.indexWhere(_retryable) == index =>
-          TextButton(
-            key: MailImportStatusLine.retryAnalysisKey,
-            onPressed: () => _withService((s) => s.retryAnalysis()),
-            child: const Text('重试'),
-          ),
-        _ => null,
-      };
+  /// 第 [index] 条提示旁边的按钮；没有要她做的事时没有。一个 [重试]
+  /// 会重试所有失败的邮件，所以只放在第一条能重试的提示旁边。找不到
+  /// Claude Code 和没登录时另有 [检查]，打开向导第 3 步。
+  List<Widget> _actions(List<ImportNotice> notices, int index) => [
+    if (notices[index] case ClaudeNotInstalled() || ClaudeNotLoggedIn())
+      TextButton(
+        key: MailImportStatusLine.checkClaudeKey,
+        onPressed: () => widget.onOpenSetup(SetupStep.claude),
+        child: const Text('检查'),
+      ),
+    if (notices[index] case AnalysisPaused())
+      TextButton(
+        key: MailImportStatusLine.resumeAnalysisKey,
+        onPressed: () => _withService((s) => s.resumeAnalysis()),
+        child: const Text('继续分析'),
+      ),
+    if (_retryable(notices[index]) && notices.indexWhere(_retryable) == index)
+      TextButton(
+        key: MailImportStatusLine.retryAnalysisKey,
+        onPressed: () => _withService((s) => s.retryAnalysis()),
+        child: const Text('重试'),
+      ),
+  ];
 
   static bool _retryable(ImportNotice notice) =>
       notice is ClaudeNotInstalled ||

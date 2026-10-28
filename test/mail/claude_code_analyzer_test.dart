@@ -54,6 +54,7 @@ void main() {
   ClaudeCodeAnalyzer analyzerWith({
     Map<String, String> environment = const {'PATH': '/usr/bin'},
     Duration timeout = const Duration(seconds: 5),
+    Duration statusTimeout = const Duration(seconds: 5),
     String? executable = '/usr/bin/claude',
   }) => ClaudeCodeAnalyzer(
     startProcess: starter.start,
@@ -62,6 +63,7 @@ void main() {
     // 不在测试里真的执行 taskkill。
     killProcessTree: (process) async => process.kill(),
     timeout: timeout,
+    statusTimeout: statusTimeout,
   );
 
   setUp(() {
@@ -420,6 +422,70 @@ void main() {
       );
     });
   });
+  group('检查安装和登录（向导第 3 步）', () {
+    String status({required bool loggedIn}) => jsonEncode({
+      'loggedIn': loggedIn,
+      'authMethod': loggedIn ? 'claude.ai' : 'none',
+      'email': 'her@example.edu',
+    });
+
+    test('找不到 claude 时是没安装，不启动进程', () async {
+      analyzer = analyzerWith(executable: null);
+
+      expect(await analyzer.checkStatus(), isA<ClaudeCodeMissing>());
+      expect(starter.calls, isEmpty);
+    });
+
+    test('已登录时给出位置；用 auth status 查，环境变量和分析时一样', () async {
+      analyzer = analyzerWith(
+        environment: {'PATH': '/usr/bin', 'ANTHROPIC_API_KEY': 'sk-fake'},
+      );
+      starter.respond(stdout: status(loggedIn: true));
+
+      final result = await analyzer.checkStatus();
+
+      expect(
+        result,
+        isA<ClaudeCodeReady>().having((r) => r.path, 'path', '/usr/bin/claude'),
+      );
+      final call = starter.calls.single;
+      expect(call.arguments, ['auth', 'status', '--json']);
+      expect(call.environment, {'PATH': '/usr/bin'});
+    });
+
+    test('没登录时是未登录，也给出位置', () async {
+      starter.respond(stdout: status(loggedIn: false), exitCode: 1);
+
+      expect(
+        await analyzer.checkStatus(),
+        isA<ClaudeCodeNotLoggedIn>().having(
+          (r) => r.path,
+          'path',
+          '/usr/bin/claude',
+        ),
+      );
+    });
+
+    test('启动不了时是没安装', () async {
+      starter.failToStart();
+
+      expect(await analyzer.checkStatus(), isA<ClaudeCodeMissing>());
+    });
+
+    test('输出认不出来时说不清是否登录', () async {
+      starter.respond(stdout: 'error: unknown command auth', exitCode: 1);
+
+      expect(await analyzer.checkStatus(), isA<ClaudeCodeLoginUnknown>());
+    });
+
+    test('超时时结束进程，说不清是否登录', () async {
+      analyzer = analyzerWith(statusTimeout: const Duration(milliseconds: 50));
+      starter.hang();
+
+      expect(await analyzer.checkStatus(), isA<ClaudeCodeLoginUnknown>());
+      expect(starter.calls.single.process.killed, isTrue);
+    });
+  });
 }
 
 /// 一次启动进程的记录。
@@ -440,6 +506,8 @@ class StartedCall {
   final String workingDirectory;
   final Map<String, String> environment;
   final bool workingDirectoryWasEmpty;
+
+  /// 没有提示词文件的调用（检查登录状态）时为空。
   final String promptFilePath;
   final String promptFileContent;
   final FakeProcess process;
@@ -472,7 +540,8 @@ class FakeProcessStarter {
   }) async {
     if (_failToStart) throw ProcessException(executable, arguments);
     final process = _scripts.removeAt(0)();
-    final promptPath = arguments[arguments.indexOf('--system-prompt-file') + 1];
+    final promptIndex = arguments.indexOf('--system-prompt-file');
+    final promptPath = promptIndex < 0 ? '' : arguments[promptIndex + 1];
     calls.add(
       StartedCall(
         executable: executable,
@@ -483,7 +552,9 @@ class FakeProcessStarter {
             .listSync()
             .isEmpty,
         promptFilePath: promptPath,
-        promptFileContent: File(promptPath).readAsStringSync(),
+        promptFileContent: promptPath.isEmpty
+            ? ''
+            : File(promptPath).readAsStringSync(),
         process: process,
       ),
     );
